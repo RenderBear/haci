@@ -49,7 +49,7 @@
 \maketitle
 
 \begin{abstract}
-This paper describes HaCI (Harmonic Contour Integration), a compact, fully distributed edge detection method. Through the encoding of classical early-visual priors like divisive normalisation, and associative field facilitation and suppression, the method exposes a network made up of a small set of $159$ learnable parameters. The method is composed of four staged operations on an image: the construction of a pixel contrast signal (L0), harmonic projection of the signals over a pool of pixels to generate von-Mises orientation bins (L1), refinement of the signal via facilitation and suppression (Seed) and the eventual projection of the pooled signal back onto the pixel level (renderer). The renderer back projection is then passed through non-max suppression to retrieve clean edges.
+This paper describes HaCI (Harmonic Contour Integration), a compact, fully distributed edge detection method. Through the encoding of classical early-visual priors like divisive normalisation, and association-field facilitation and suppression, the method exposes a network made up of a small set of $159$ learnable parameters. The method is composed of four staged operations on an image: the construction of a per-pixel contrast signal and its projection onto circular harmonics (L0), pooling of the harmonics over overlapping cells into von~Mises orientation bins (L1), refinement of the signal via facilitation and suppression (Seed) and the eventual projection of the pooled signal back onto the pixel level (renderer). The renderer back projection is then passed through non-max suppression to retrieve clean edges.
 \end{abstract}
 
 \paragraph{Keywords.} Contour Integration, Harmonic Projection, Divisive Normalisation, Filtered Back-Projection, Edge Detection.
@@ -68,7 +68,7 @@ The pipeline operates in four stages; L0, L1, seed and renderer, each with a fix
 
 \subsection{L0: Harmonic Projection}\label{sec:l0}
 
-Let $I:\Omega\to\R^3$ be the input image in sRGB, scaled to $[0,1]$; no linearisation is applied. The eight-neighbour offsets $\delta_k = (\delta_{y,k}, \delta_{x,k})$, $k = 1, \dots, 8$, in image (row, column) order, have bearings $\phi_k = \operatorname{atan2}(-\delta_{y,k}, \delta_{x,k}) \in \{0, \pi/4, \dots, 7\pi/4\}$, measured anticlockwise from the $+x$ axis with $y$ pointing up (image rows run downwards, hence the sign).
+Let $I:\Omega\to\R^3$ be the input image in sRGB, scaled to $[0,1]$; no linearisation is applied. Before L0 the image is reflect-padded at the bottom and right so that the L1 cell grid (\cref{sec:l1}) covers it exactly, and $\Omega$ denotes this padded domain; the boundary map is cropped back to the original image $\Omega_0 \subseteq \Omega$ at the end. The eight-neighbour offsets $\delta_k = (\delta_{y,k}, \delta_{x,k})$, $k = 1, \dots, 8$, in image (row, column) order, have bearings $\phi_k = \operatorname{atan2}(-\delta_{y,k}, \delta_{x,k}) \in \{0, \pi/4, \dots, 7\pi/4\}$, measured anticlockwise from the $+x$ axis with $y$ pointing up (image rows run downwards, hence the sign).
 Luminance and chrominance are routed through separate channels of a learned spectral metric, divisively normalised against their own energy and a spatial pool of local contrast, and projected onto circular harmonics to produce per-pixel complex moments $z_1, z_2 \in \mathbb{C}$.
 
 \paragraph{Spectral RGB metric:}
@@ -87,11 +87,11 @@ The four learned scalars are $(w_\ell, s_1, s_2, \theta_{\mathrm{chr}})$ with $w
 \paragraph{JPEG notch:}
 Each projected channel $u_j$ is filtered by a learnable separable notch, $\tilde u_j = h_N * u_j$, applied along rows and then columns with replicate padding. The 1D frequency response is real and even,
 \begin{equation}\label{eq:notch}
-  N(\omega) = 1 - d \exp\!\left(-\frac{(\abs{\omega} - \omega_n)^2}{2\sigma_n^2}\right),
+  \hat h_N(\omega) = 1 - d \exp\!\left(-\frac{(\abs{\omega} - \omega_n)^2}{2\sigma_n^2}\right),
 \end{equation}
 and the kernel of half-width $H_N$ is synthesised from it by a cosine sum over the $L_N = 2H_N + 1$ sampled frequencies $\omega_m = m/L_N$:
 \begin{equation}\label{eq:notch-kernel}
-  h_N[n] = \frac{1}{L_N}\sum_{m=-H_N}^{H_N} N(\omega_m)\cos(2\pi\omega_m n),
+  h_N[n] = \frac{1}{L_N}\sum_{m=-H_N}^{H_N} \hat h_N(\omega_m)\cos(2\pi\omega_m n),
   \qquad n \in \{-H_N, \dots, H_N\}.
 \end{equation}
 The three learnable scalars are $\omega_n = \tfrac{1}{2}\sigma(\cdot) \in (0, \tfrac{1}{2})$ cycles/px, $\sigma_n = \softplus(\cdot)$ and $d = \sigma(\cdot) \in (0, 1)$. They are initialised as a notch at the 8-px JPEG block frequency, $\omega_n = 1/8$, $\sigma_n = 1/32$, $d = 0.8$; the learned response is discussed in \cref{sec:results}.
@@ -106,14 +106,14 @@ For each pixel $p$ and offset $\delta_k$, the squared luminance and chrominance 
 and set to zero where $p - \delta_k$ falls outside $\Omega$. Without the notch ($\tilde u = u$) these are, by linearity, $w_\ell^2 (L \cdot \Delta c_k)^2$ and $s_1^2 (b_1 \cdot \Delta c_k)^2 + s_2^2 (b_2 \cdot \Delta c_k)^2$ with $\Delta c_k(p) = I(p) - I(p - \delta_k)$: the squared norms of $\Delta c_k$ under the luminance and chrominance blocks of $M$.
 
 \paragraph{Contrast gain control:}
-Each channel $c \in \{\mathrm{lum}, \mathrm{chr}\}$ is passed through a rational saturating nonlinearity~\cite{naka1966srod} whose denominator also carries the contrast energy pooled over all directions and over a spatial neighbourhood~\cite{heeger1992normalisation}:
+Each channel $\chi \in \{\mathrm{lum}, \mathrm{chr}\}$ is passed through a rational saturating nonlinearity~\cite{naka1966srod} whose denominator also carries the contrast energy pooled over all directions and over a spatial neighbourhood~\cite{heeger1992normalisation}:
 \begin{equation}\label{eq:nr}
-  h_k^{c}(p) = \frac{m_k^{c}(p)^2}
-                    {\eta_c^2 + m_k^{c}(p)^2 + \lambda_0\, P^{c}(p)},
+  h_k^{\chi}(p) = \frac{m_k^{\chi}(p)^2}
+                    {\eta_\chi^2 + m_k^{\chi}(p)^2 + \lambda_0\, Q^{\chi}(p)},
   \qquad
-  P^{c} = G_{\sigma_r} * \sum_{k'=1}^{8} \bigl(m_{k'}^{c}\bigr)^2,
+  Q^{\chi} = G_{\sigma_r} * \sum_{k'=1}^{8} \bigl(m_{k'}^{\chi}\bigr)^2,
 \end{equation}
-with $h_k(p) = h_k^{\mathrm{lum}}(p) + h_k^{\mathrm{chr}}(p)$. $G_{\sigma_r}$ is a normalised separable Gaussian truncated at radius $r_P$ (reflect padding). The pool weight $\lambda_0$ and width $\sigma_r$ are learned through $\softplus$; at $\lambda_0 = 0$, \cref{eq:nr} reduces to a per-direction Naka--Rushton squash. The half-saturation constants $\eta_{\mathrm{lum}}, \eta_{\mathrm{chr}}$ are fixed (\cref{tab:fixed-params}): only $m/\eta$ enters, and the metric gains $w_\ell, s_1, s_2$ already set that scale.
+with $h_k(p) = h_k^{\mathrm{lum}}(p) + h_k^{\mathrm{chr}}(p)$. $G_{\sigma_r}$ is a normalised separable Gaussian truncated at radius $r_Q$ (reflect padding). The pool weight $\lambda_0$ and width $\sigma_r$ are learned through $\softplus$; at $\lambda_0 = 0$, \cref{eq:nr} reduces to a per-direction Naka--Rushton squash. The half-saturation constants $\eta_{\mathrm{lum}}, \eta_{\mathrm{chr}}$ are fixed (\cref{tab:fixed-params}): only $m/\eta$ enters, and the metric gains $w_\ell, s_1, s_2$ already set that scale.
 
 \paragraph{Harmonic projection:}
 The eight values $\{h_k(p)\}_{k=1}^{8}$ are projected onto the first two circular harmonics, yielding a complex dipole $z_1$ (polarity) and quadrupole $z_2$ (orientation, double-angle):
@@ -126,27 +126,27 @@ The second-harmonic magnitude $h_{2m}(p) = \abs{z_2(p)}$ is exported separately.
 
 \subsection{L1: Cell-Level Orientation Binning}\label{sec:l1}
 
-The image is reflect-padded at the bottom and right so that the cell grid covers it exactly, then partitioned into overlapping $P{\times}P$ cells with stride $S = P - O$, indexed by $c$. Inside cell $c$ with pixel set $\mathcal{P}_c$, the per-pixel orientation estimate is $\theta_p = \tfrac{1}{2}\arg z_2(p)$. With $K$ orientation bins of centres $\bar\theta_k = k\pi/K$ for $k=0,\dots,K-1$, the per-pixel von~Mises weight is
+The padded image (\cref{sec:l0}) is partitioned into overlapping $P{\times}P$ cells with stride $D = P - O$, indexed by $c$. Because $D < P$, a cell shares pixels with every cell up to $\lfloor (P - 1)/D \rfloor = 2$ steps away in each direction, $24$ neighbours in all. Inside cell $c$ with pixel set $\mathcal{P}_c$, the per-pixel orientation estimate is $\theta_p = \tfrac{1}{2}\arg z_2(p)$. With $K$ orientation bins of centres $\bar\theta_k = k\pi/K$ for $k=0,\dots,K-1$, the per-pixel von~Mises weight is
 \begin{equation}\label{eq:vm-weight}
-  g_k(\theta_p) = \exp\!\bigl(\kappa_{\mathrm{vm}}\,(\cos(2(\theta_p - \bar\theta_k)) - 1)\bigr),
+  v_k(\theta_p) = \exp\!\bigl(\kappa_{\mathrm{vm}}\,(\cos(2(\theta_p - \bar\theta_k)) - 1)\bigr),
 \end{equation}
 with learnable concentration $\kappa_{\mathrm{vm}} > 0$ ($\softplus$). The per-bin energy and sub-pixel anchors are
 \begin{equation}\label{eq:rho-bin}
   \boxed{\;
-  \rho^{(k)}(c) = \sum_{p \in \mathcal{P}_c} \abs{z_2(p)}\, g_k(\theta_p)\, \mathrm{ok}_p,\;}
+  \rho^{(k)}(c) = \sum_{p \in \mathcal{P}_c} \abs{z_2(p)}\, v_k(\theta_p)\, \mathrm{ok}_p,\;}
 \end{equation}
 \begin{equation}\label{eq:anchor-bin}
-  a_x^{(k)}(c) = \frac{\sum_{p} \abs{z_2(p)}\, g_k(\theta_p)\, x_p\, \mathrm{ok}_p}{\sum_{p} \abs{z_2(p)}\, g_k(\theta_p)\, \mathrm{ok}_p + \varepsilon},
+  a_x^{(k)}(c) = \frac{\sum_{p} \abs{z_2(p)}\, v_k(\theta_p)\, x_p\, \mathrm{ok}_p}{\sum_{p} \abs{z_2(p)}\, v_k(\theta_p)\, \mathrm{ok}_p + \varepsilon},
 \end{equation}
-and similarly $a_y^{(k)}(c)$, where $\mathrm{ok}_p \in \{0,1\}$ excludes border pixels. Cells whose border-pixel fraction exceeds $0.2$, or that extend past the unpadded image, are flagged as $\mathrm{ok}(c) = 0$ and excluded from all downstream sums.
+and similarly $a_y^{(k)}(c)$, where $\mathrm{ok}_p \in \{0,1\}$ excludes border pixels. Cells whose border-pixel fraction exceeds $0.2$, or that extend past the unpadded image, are flagged as $\mathrm{ok}(c) = 0$: the seed sets their response to zero and the renderer deposits nothing from them. They still count as neighbours: the seed's facilitation and surround means (\cref{sec:seed}) are normalised by fixed kernel sums, so a flagged cell enters them with value zero.
 
-The output of L1 is the per-bin tensor $\rho^{(k)}(c) \in \R^{N \times K}$ together with the sub-pixel anchors $(a_x^{(k)}, a_y^{(k)})$ and the bin centres $\bar\theta_k$. L1 has no learned parameters of its own; $\kappa_{\mathrm{vm}}$ is stored with the seed's parameters, and L1 is recomputed at every training step from the live L0 output, so gradients reach $\kappa_{\mathrm{vm}}$ through the bin weights $g_k$.
+The output of L1 is the per-bin tensor $\rho^{(k)}(c) \in \R^{N \times K}$ together with the sub-pixel anchors $(a_x^{(k)}, a_y^{(k)})$ and the bin centres $\bar\theta_k$. L1 has no learned parameters of its own; $\kappa_{\mathrm{vm}}$ is stored with the seed's parameters, and L1 is recomputed at every training step from the live L0 output, so gradients reach $\kappa_{\mathrm{vm}}$ through the bin weights $v_k$.
 
 \subsection{Seed: Gain Control}\label{sec:seed}
 
 The seed refines the L1 signal, converting the per-bin energies $\rho^{(k)}$ into a per-bin readout $\rho_{\mathrm{out}}^{(k)}(c) \in [0, 1]$, from which a per-cell scalar $\rho(c)$ and an orientation $\theta(c)$ are read. Each bin is facilitated by a co-circular association field along its tangent and divisively normalised against the same orientation in the surrounding cells.
 
-The per-cell state the seed produces (a boundary strength $\rho(c)$, an orientation $\theta(c)$, and a sub-pixel anchor) is deliberately task-agnostic: it is a self-contained mid-level contour representation that downstream stages could consume directly for segmentation, grouping, or shape analysis. We use the term \emph{seed} in this sense, as the distilled contour signal from which further processing proceeds. For the edge-detection task treated here that further processing is a single stage: the renderer (\cref{sec:render}) back-projects the seed onto the pixel grid. The seed itself does not depend on this choice of readout.
+The per-cell state the seed produces (a boundary strength $\rho(c)$, an orientation $\theta(c)$, and a sub-pixel anchor) is designed to be task-agnostic: a mid-level contour representation that downstream stages could consume directly for segmentation, grouping, or shape analysis. We use the term \emph{seed} in this sense, as the distilled contour signal from which further processing proceeds. For the edge-detection task treated here that further processing is a single stage: the renderer (\cref{sec:render}) back-projects the seed onto the pixel grid. The seed's architecture does not depend on this choice of readout, but its parameters do: they are trained only through the renderer and the edge loss, and the per-cell exports are not on that path (see the cell-level export below), so their use as a general representation is untested here.
 
 \paragraph{Per-bin Naka--Rushton squash:}
 With $R^{(k)}(c) = \rho^{(k)}(c)\,\mathrm{ok}(c)$ and learnable half-saturation $\eta_z > 0$,
@@ -198,7 +198,7 @@ Each bin is pooled over the neighbouring cells of the same bin with a Gaussian o
   \qquad
   G_{\sigma_S}(\delta) = \exp\!\left(-\frac{\norm{\delta}^2}{2\sigma_S^2}\right).
 \end{equation}
-The pool is tuned exactly like the bins (through $\kappa_{\mathrm{vm}}$), so a cell's own orientation never reaches another channel's pool, and the readout codes each cell relative to its same-orientation context. $G_{\sigma_S}$ is separable: it is applied as a depthwise row and column convolution (reflect padding) and the centre tap is subtracted.
+The pool is tuned exactly like the bins (through $\kappa_{\mathrm{vm}}$), so a cell's own orientation never reaches another channel's pool, and the readout codes each cell relative to its same-orientation context. Only the cell is excluded, not its pixels: the $24$ nearest cells overlap it (\cref{sec:l1}), so $S$ also reads part of the cell's own L1 input and acts as a near-field same-orientation pool rather than a surround outside the cell's footprint. The near offsets of the association field overlap the cell in the same way; \cref{sec:results} gives the weight shares in the released model. $G_{\sigma_S}$ is separable: it is applied as a depthwise row and column convolution (reflect padding) and the centre tap is subtracted.
 
 \paragraph{Divisive Readout:}
 Collinear support scales the cell's own response, and the bridge adds a term that is non-zero only where there is support on both sides:
@@ -245,12 +245,12 @@ where $\mu^{(k)}_{\mathrm{coll}}$ is a position-weighted collinear support, and 
 \begin{equation}\label{eq:mlp-bounded}
   \begin{aligned}
     \kappa^{(k)}_c       &= \kappa_{\max}\, \tanh\!\bigl(\Phi_1(F^{(k)}_c)\bigr), \\
-    e^{(k)}_c            &= e_{\max}\, \tanh\!\bigl(\Phi_2(F^{(k)}_c)\bigr), \\
+    \xi^{(k)}_c          &= \xi_{\max}\, \tanh\!\bigl(\Phi_2(F^{(k)}_c)\bigr), \\
     \delta_{n}{}^{(k)}_c &= \delta_{n,\max}\, \tanh\!\bigl(\Phi_3(F^{(k)}_c)\bigr), \\
     \alpha^{(k)}_c       &= \exp\!\bigl(\alpha_{\mathrm{range}}\, \tanh\!\bigl(\Phi_4(F^{(k)}_c)\bigr)\bigr),
   \end{aligned}
 \end{equation}
-where $\kappa_{\max}, e_{\max}, \delta_{n,\max}, \alpha_{\mathrm{range}}$ are learnable positive bounds. The four scalars are a curvature, a tangent-direction shift of the stroke vertex, a normal-direction anchor correction, and a multiplicative amplitude $\alpha \in [e^{-\alpha_{\mathrm{range}}}, e^{+\alpha_{\mathrm{range}}}]$. At initialisation $\Phi$ outputs nearly zero, so $\kappa, e, \delta_n \approx 0$ and $\alpha \approx 1$, recovering an unmodulated straight stroke.
+where $\kappa_{\max}, \xi_{\max}, \delta_{n,\max}, \alpha_{\mathrm{range}}$ are learnable positive bounds. The four scalars are a curvature, a tangent-direction shift of the stroke vertex, a normal-direction anchor correction, and a multiplicative amplitude $\alpha \in [e^{-\alpha_{\mathrm{range}}}, e^{+\alpha_{\mathrm{range}}}]$. At initialisation $\Phi$ outputs nearly zero, so $\kappa, \xi, \delta_n \approx 0$ and $\alpha \approx 1$, recovering an unmodulated straight stroke.
 
 \paragraph{Sparsity Gate:}
 Each cell's bins compete via a winner-decay gate
@@ -273,9 +273,9 @@ For each pixel $p$ in the deposit window of $\tilde a^{(k)}_c$, let $\Delta = p 
   \qquad
   n = -\Delta_y \sin\bar\theta_k + \Delta_x \cos\bar\theta_k,
 \end{equation}
-shift the tangent coordinate by $e$ and bend the normal coordinate by the parabolic curvature term,
+shift the tangent coordinate by $\xi$ and bend the normal coordinate by the parabolic curvature term,
 \begin{equation}\label{eq:bend}
-  \tilde s = s - e^{(k)}_c, \qquad n_c = n - \tfrac{1}{2}\kappa^{(k)}_c\, \tilde s^{2},
+  \tilde s = s - \xi^{(k)}_c, \qquad n_c = n - \tfrac{1}{2}\kappa^{(k)}_c\, \tilde s^{2},
 \end{equation}
 and synthesise the (non-negative) stroke profile by a product of learned 1D kernels:
 \begin{equation}\label{eq:f}
@@ -286,16 +286,16 @@ Both kernels are evaluated at continuous query positions by linear interpolation
 \paragraph{Learned 1D Kernels:}
 The radial filter $h_{\perp}$ is parameterised as a windowed ramp from the inverse-Radon family,
 \begin{equation}\label{eq:h-perp}
-  h_{\perp}[n] = \mathrm{IFFT}\bigl(\abs{\omega}\, W(\omega)\bigr)[n],
+  h_{\perp}[n] = \mathrm{IFFT}\bigl(\abs{\omega}\, \mathcal{W}(\omega)\bigr)[n],
   \qquad n \in \{-H_w, \dots, H_w\},
 \end{equation}
-where $W(\omega) \geq 0$ is a monotonically decreasing window in $\abs{\omega}$, parameterised by $H_w + 1$ logits $(\varphi_0, \dots, \varphi_{H_w})$ via
-$W(0) = \softplus(\varphi_0)$, $W(\omega_{m+1}) = W(\omega_m)\,\sigma(\varphi_{m+1})$.
+where $\mathcal{W}(\omega) \geq 0$ is a monotonically decreasing window in $\abs{\omega}$, parameterised by $H_w + 1$ logits $(\nu_0, \dots, \nu_{H_w})$ via
+$\mathcal{W}(0) = \softplus(\nu_0)$, $\mathcal{W}(\omega_{m+1}) = \mathcal{W}(\omega_m)\,\sigma(\nu_{m+1})$.
 This constrains $h_{\perp}$ to the shape of an FBP ramp filter and initialises it to a Hann window of cutoff $\omega_c$; the resulting profile is the FBP-shaped piece of the renderer.
 
-The longitudinal profile $h_{\parallel}$ is an even, monotonically decreasing function from a positive peak, parameterised by $H_w$ decay-ratio logits $(\psi_1, \dots, \psi_{H_w})$ and one peak parameter $h_0$:
+The longitudinal profile $h_{\parallel}$ is an even, monotonically decreasing function from a positive peak, parameterised by $H_w$ decay-ratio logits $(\zeta_1, \dots, \zeta_{H_w})$ and one peak parameter $h_0$:
 \begin{equation}\label{eq:h-par}
-  h_{\parallel}[m] = h_0 \prod_{j=1}^{\abs{m}} \sigma(\psi_j),
+  h_{\parallel}[m] = h_0 \prod_{j=1}^{\abs{m}} \sigma(\zeta_j),
   \qquad h_0 = \softplus(h_{0,\mathrm{raw}}),
 \end{equation}
 initialised to a Gaussian of width $\sigma_{\parallel,0}$.
@@ -318,14 +318,14 @@ At inference, $\hat B$ is thinned by ridge non-maximum suppression along the cla
 % ─────────────────────────────────────────────────────────────────────
 \section{Training}\label{sec:train}
 
-The loss is HED-style class-balanced binary cross-entropy~\cite{xie2015hed}. Let $y(p) \in [0, 1]$ be the ground-truth target and $\hat B(p)$ the prediction, clamped to $[10^{-6}, 1 - 10^{-6}]$. With $n = \abs{\Omega}$, $n_+ = \abs{\{p : y(p) \geq \tfrac{1}{2}\}}$, $n_- = n - n_+$ and $\beta = n_-/n$, the loss is
+The loss is HED-style class-balanced binary cross-entropy~\cite{xie2015hed}. Let $y(p) \in [0, 1]$ be the ground-truth target and $\hat B(p)$ the prediction, clamped to $[10^{-6}, 1 - 10^{-6}]$. The loss is taken over the original image $\Omega_0$, which has $n_+$ positive pixels ($y(p) \geq \tfrac{1}{2}$) and $n_- = \abs{\Omega_0} - n_+$ negative ones:
 \begin{equation}\label{eq:loss}
-  \mathcal{L} = -\frac{1}{n}\sum_{p}\Bigl[\beta\, y(p)\log\hat B(p) + (1 - \beta)\,(1 - y(p))\log(1 - \hat B(p))\Bigr].
+  \mathcal{L} = -\frac{1}{\abs{\Omega_0}}\sum_{p \in \Omega_0}\Bigl[\frac{n_-}{\abs{\Omega_0}}\, y(p)\log\hat B(p) + \frac{n_+}{\abs{\Omega_0}}\,(1 - y(p))\log(1 - \hat B(p))\Bigr],
 \end{equation}
 computed per image and averaged over the batch.
 Gradients flow through all four stages: through the renderer's MLP, correction bounds, gate temperature and 1D kernels; through the seed's eleven scalars; through the L1 von~Mises weights via $\kappa_{\mathrm{vm}}$; and through the L0 metric $(w_\ell, s_1, s_2, \theta_{\mathrm{chr}})$, notch $(\omega_n, \sigma_n, d)$ and gain control $(\lambda_0, \sigma_r)$. Because every L0 parameter is learned, L0 and L1 are recomputed at every step; the training cache holds only the padded RGB image, the ground truth and the border mask.
 
-We train on the 300-image BRIND train split~\cite{pu2021rindnet}\footnote{\url{https://github.com/xavysp/BRIND}}, the BSDS500 images~\cite{arbelaez2011gpb} re-annotated for reflectance, illumination, normal and depth discontinuities and merged into one edge map per image. We use Adam~\cite{kingma2014adam} with a cosine annealing schedule from $\eta_0 = 5\times 10^{-2}$ to $\eta_{\min} = 0.1\,\eta_0$, gradient clipping at $\norm{\nabla}_2 \leq 1$, batch size $4$, for $50$ epochs.
+We train on the 300-image BRIND train split~\cite{pu2021rindnet}\footnote{\url{https://github.com/xavysp/BRIND}}, the BSDS500 images~\cite{arbelaez2011gpb} re-annotated for reflectance, illumination, normal and depth discontinuities and merged into one edge map per image. We use Adam~\cite{kingma2014adam} with a learning rate of $5\times 10^{-2}$ annealed on a cosine schedule to $5\times 10^{-3}$, gradient clipping at $\norm{\nabla}_2 \leq 1$, batch size $4$, for $50$ epochs.
 
 % ─────────────────────────────────────────────────────────────────────
 \section{Results}\label{sec:results}
@@ -347,12 +347,12 @@ Soft map $\hat B$ & $0.7043$ & $0.6777$ & $0.7331$ & $0.7274$ & $0.6524$ \\
 \end{tabular}
 \end{table}
 
-Two learned values change how the corresponding stages should be read. The notch moved away from its JPEG initialisation to $\omega_n = 0.41$, $\sigma_n = 0.18$, $d = 0.83$; at the five sampled frequencies $0, 1/9, \dots, 4/9$ cycles/px its gain is $0.94, 0.79, 0.52, 0.25, 0.19$, so it acts as a broad high-frequency cut rather than a notch. The curvature tolerance fell to $\sigma_\kappa = 0.002$, which shifts the co-circular read of \cref{eq:cocirc-read} by at most $0.01$ of a bin: in the released model the association field is effectively collinear.
+Three learned properties change how the corresponding stages should be read. The notch moved away from its JPEG initialisation to $\omega_n = 0.41$, $\sigma_n = 0.18$, $d = 0.83$; at the five sampled frequencies $0, 1/9, \dots, 4/9$ cycles/px its gain is $0.94, 0.79, 0.52, 0.25, 0.19$, so it acts as a broad high-frequency cut rather than a notch. The curvature tolerance fell to $\sigma_\kappa = 0.002$, which shifts the co-circular read of \cref{eq:cocirc-read} by at most $0.01$ of a bin: in the released model the association field is effectively collinear. Finally, the learned widths $\sigma_S = 1.80$ and $\sigma_f = 1.86$ cells keep both seed pools close to the cell: $69\%$ of the surround weight, and $65$--$73\%$ of each facilitation lobe's weight depending on the bin, falls on the $24$ cells that share pixels with it.
 
 % ─────────────────────────────────────────────────────────────────────
 \section{Qualitative Example}\label{sec:qualitative}
 
-HaCI applied to a single natural image is shown in \cref{fig:example}. The input (\cref{fig:base}) is a full-colour photograph with luminance and chrominance contrasts that L0 routes through the learned spectral metric. The output (\cref{fig:edges}) is the thinned boundary map obtained at inference by ridge non-maximum suppression along the claim-weighted orientation $\theta^\star(p)$ followed by thresholding at $t_{\mathrm{edge}} = 1/2$ (\cref{sec:render}). White pixels mark the surviving one-pixel-wide contours after thresholding the readout at 0.5.
+HaCI applied to a single natural image is shown in \cref{fig:example}. The input (\cref{fig:base}) is a $1280 \times 961$ full-colour photograph of zebras on dry grassland, from outside the BRIND splits, with luminance and chrominance contrasts that L0 routes through the learned spectral metric. The output (\cref{fig:edges}) is the inference output of \cref{sec:render}: $\hat B$ thinned by ridge non-maximum suppression along the claim-weighted orientation $\theta^\star(p)$ and thresholded at $t_{\mathrm{edge}} = 1/2$. White pixels mark the surviving one-pixel-wide contours.
 
 \begin{figure}[t]
   \centering
@@ -360,7 +360,7 @@ HaCI applied to a single natural image is shown in \cref{fig:example}. The input
     \vspace{0pt}
     \centering
     \includegraphics[width=\linewidth]{base.png}
-    \caption{Input image $I$. The base image}
+    \caption{Input image $I$.}
     \label{fig:base}
   \end{subfigure}%
   \hfill
@@ -368,10 +368,10 @@ HaCI applied to a single natural image is shown in \cref{fig:example}. The input
     \vspace{0pt}
     \centering
     \includegraphics[width=\linewidth]{edges.png}
-    \caption{Detected edges $\hat B$. Edges extracted via the pipeline and a final non-max suppression pass}
+    \caption{Detected edges: ridge-NMS of $\hat B$, thresholded at $t_{\mathrm{edge}} = 1/2$.}
     \label{fig:edges}
   \end{subfigure}
-  \caption{Qualitative result on one test image. Left: input. Right: HaCI edge map at inference.}
+  \caption{Qualitative result on one natural image from outside the BRIND splits, with the released model. Left: input. Right: HaCI edge map at inference.}
   \label{fig:example}
 \end{figure}
 
@@ -392,15 +392,15 @@ Block & Symbol & Value\\
 L0 luminance half-saturation & $\eta_{\mathrm{lum}}$ & $0.01$ \\
 L0 chrominance half-saturation & $\eta_{\mathrm{chr}}$ & $0.01$ \\
 L0 notch half-width & $H_N$ & $4$ \\
-L0 gain-control pool radius & $r_P$ & $16$\,px \\
+L0 gain-control pool radius & $r_Q$ & $16$\,px \\
 L1 cell size & $P$ & $5$\,px \\
-L1 cell overlap & $O$ & $3$\,px (stride $S = 2$) \\
+L1 cell overlap & $O$ & $3$\,px (stride $D = 2$) \\
 L1 border-cell fraction & --- & $0.2$ \\
 L1/Seed orientation bins & $K$ & $8$ \\
 Seed association-field radius & $r_f$ & $5$ cells \\
 Seed surround radius & $r_S$ & $10$ cells \\
 Seed STE temperature & $\tau$ & $0.1$ \\
-Renderer deposit half-width & $H_w$ & $\lceil 2 S \rceil = 4$\,px \\
+Renderer deposit half-width & $H_w$ & $\lceil 2 D \rceil = 4$\,px \\
 Inference edge threshold & $t_{\mathrm{edge}}$ & $0.5$ \\
 \bottomrule
 \end{tabular}
@@ -438,10 +438,10 @@ Seed surround width & $\sigma_S$ ($\geq 0.3$) & $1.0$ & 1 \\
 \multicolumn{3}{l}{\textbf{Seed subtotal}} & $\bm{11}$ \\
 \midrule
 Renderer correction MLP $5\to 12\to 4$ & $\Phi$ & near-zero output & 124 \\
-Renderer correction bounds & $\kappa_{\max}, e_{\max}, \delta_{n,\max}, \alpha_{\mathrm{range}}$ & $0.1, 1, 1, 0.5$ & 4 \\
+Renderer correction bounds & $\kappa_{\max}, \xi_{\max}, \delta_{n,\max}, \alpha_{\mathrm{range}}$ & $0.1, 1, 1, 0.5$ & 4 \\
 Renderer gate temperature & $T_{\mathrm{gate}}$ & $0.08$ & 1 \\
-Renderer radial filter & $\{\varphi_m\}_{m=0}^{H_w}$ & Hann $\omega_c=0.5$ & 5 \\
-Renderer longitudinal filter & $\{\psi_j\}_{j=1}^{H_w}, h_0$ & Gaussian $\sigma_{\parallel,0}=2$ & 5 \\
+Renderer radial filter & $\{\nu_m\}_{m=0}^{H_w}$ & Hann $\omega_c=0.5$ & 5 \\
+Renderer longitudinal filter & $\{\zeta_j\}_{j=1}^{H_w}, h_0$ & Gaussian $\sigma_{\parallel,0}=2$ & 5 \\
 \midrule
 \multicolumn{3}{l}{\textbf{Renderer subtotal}} & $\bm{139}$ \\
 \midrule
@@ -453,12 +453,12 @@ Renderer longitudinal filter & $\{\psi_j\}_{j=1}^{H_w}, h_0$ & Gaussian $\sigma_
 % ─────────────────────────────────────────────────────────────────────
 \section{Discussion}\label{sec:discussion}
 
-HaCI compresses a classical contour-integration computation into a fully differentiable graph of $159$ scalars. The choice of what to expose to data and what to fix, is rooted in the strict interpretation of cortical mechanisms. The renderer's $5 \to 12 \to 4$ correction head is the smallest learned component that empirically suffices to handle off-anchor edges, sub-pixel curvature, and bin selectivity at junctions; replacing it with a fixed identity recovers a straight-stroke depositor that is competitive but coarser. The kernels $h_{\perp}, h_{\parallel}$ are parameterised so that every point in parameter space is a valid windowed-ramp radial filter and a positive monotone-decay longitudinal profile, respectively. This keeps the synthesis path interpretable as a ramp-filtered stroke deposit, while leaving the kernel shape open to gradient descent against the boundary objective.
+HaCI compresses a classical contour-integration computation into a fully differentiable graph of $159$ scalars. The choice of what to expose to data and what to fix is rooted in the strict interpretation of cortical mechanisms. The renderer's $5 \to 12 \to 4$ correction head is the only learned component that is neither a named scalar nor a constrained filter; it is there to handle off-anchor edges, sub-pixel curvature and bin selectivity at junctions. With its output held at zero ($\kappa = \xi = \delta_n = 0$, $\alpha = 1$) the renderer reduces to a straight-stroke depositor; how much the head adds over that is left to the ablations below. The kernels $h_{\perp}, h_{\parallel}$ are parameterised so that every point in parameter space is a valid windowed-ramp radial filter and a positive monotone-decay longitudinal profile, respectively. This keeps the synthesis path interpretable as a ramp-filtered stroke deposit, while leaving the kernel shape open to gradient descent against the boundary objective.
 
 This report fixes the equations and reports results on BRIND (\cref{sec:results}); ablations and comparison against deep baselines~\cite{xie2015hed,liu2017rcf,he2019bdcn,pu2022edter,soria2023dexined,ye2024diffusionedge} are deferred to a forthcoming full paper.
 
 \section*{Code availability}
-The reference implementation is available at \url{https://github.com/RenderBear/hci}.
+The reference implementation is available at \url{https://github.com/RenderBear/haci}.
 
 % =====================================================================
 \appendix
@@ -474,11 +474,11 @@ The five features in \cref{eq:feats} are computed from the 3$\times$3 neighbourh
   \mu^{(k)}_n(c) &= \frac{\sum_\delta \rho_{\mathrm{out}}^{(k)}(c+\delta)\, n_k(\delta)}
                           {\sum_\delta \rho_{\mathrm{out}}^{(k)}(c+\delta)\, \abs{n_k(\delta)} + \varepsilon'},
 \end{align}
-with a soft floor $\varepsilon' = 5\times 10^{-2}$ on the denominator. $\mu^{(k)}_{\mathrm{coll}}$ summarises collinear support along the bin tangent; $\mu^{(k)}_t \in [-1, 1]$ is a signed tangent asymmetry that signals where, along the tangent, the local mass is concentrated and drives $e$; $\mu^{(k)}_n \in [-1, 1]$ is the analogous normal asymmetry and drives $\delta_n$.
+with a soft floor $\varepsilon' = 5\times 10^{-2}$ on the denominator. $\mu^{(k)}_{\mathrm{coll}}$ summarises collinear support along the bin tangent; $\mu^{(k)}_t \in [-1, 1]$ is a signed tangent asymmetry that signals where, along the tangent, the local mass is concentrated, and is meant as the cue for the tangent shift $\xi$; $\mu^{(k)}_n \in [-1, 1]$ is the analogous normal asymmetry, meant as the cue for $\delta_n$. Nothing enforces this pairing: $\Phi$ is a dense MLP, so every feature reaches all four outputs.
 
 \section{Renderer parameter count}\label{app:render-count}
 
-The correction MLP has $5 \cdot 12 + 12 = 72$ parameters in the input layer and $12 \cdot 4 + 4 = 52$ in the output layer, for $124$ total. The kernel radial logits $\{\varphi_m\}$ have $H_w + 1 = 5$ parameters; the longitudinal logits $\{\psi_j\}$ have $H_w = 4$ parameters; the longitudinal peak adds $1$. The four correction bounds $(\kappa_{\max}, e_{\max}, \delta_{n,\max}, \alpha_{\mathrm{range}})$ and the gate temperature $T_{\mathrm{gate}}$ contribute $5$ further scalars. Total: $124 + 4 + 1 + 5 + 4 + 1 = 139$.
+The correction MLP has $5 \cdot 12 + 12 = 72$ parameters in the input layer and $12 \cdot 4 + 4 = 52$ in the output layer, for $124$ total. The kernel radial logits $\{\nu_m\}$ have $H_w + 1 = 5$ parameters; the longitudinal logits $\{\zeta_j\}$ have $H_w = 4$ parameters; the longitudinal peak adds $1$. The four correction bounds $(\kappa_{\max}, \xi_{\max}, \delta_{n,\max}, \alpha_{\mathrm{range}})$ and the gate temperature $T_{\mathrm{gate}}$ contribute $5$ further scalars. Total: $124 + 4 + 1 + 5 + 4 + 1 = 139$.
 
 % =====================================================================
 \begin{thebibliography}{99}

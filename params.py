@@ -45,7 +45,6 @@ SEED = SimpleNamespace(
     ETA_Z_INIT=10.0,
     BETA_SEED_INIT=0.5,
     BETA_COLL_INIT=0.5,
-    KAPPA_THETA_INIT=2.5,
     ETA_READOUT_INIT=0.30,
     LAMBDA_INIT=0.5,
     SIGMA_F_INIT=2.0,
@@ -56,13 +55,10 @@ SEED = SimpleNamespace(
     # learned tolerance σ_κ (1/cell). σ_κ ≈ 0 at init is the same-bin collinear term.
     SIGMA_KAPPA_INIT=1e-2,
     FACIL_RADIUS=5,
-    FACIL_MODE="collinear",
     # Readout pool: each orientation bin divided by the same bin's neighbouring cells (centre
     # excluded), Gaussian σ_s in cells. Replaced the sin²Δθ cross-orientation pool, which at broad κ_vm
     # read an edge's own energy; σ_s ≈ 1 ranked candidates best on the trained model.
     SURROUND_RADIUS=10,
-    SURROUND_SIGMA=2.0,
-    SURROUND_MODE="broadside",
     SIGMA_S_INIT=1.0,
     RHO_STE_TAU=0.1,
 )

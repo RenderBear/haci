@@ -14,7 +14,6 @@ from PIL import Image
 from params import L0, L1, SEED, EVAL, INFER
 from haci.L0 import compute_l0_rgb, compute_interior
 from haci.L1 import z_from_l0_harmonics, pad_for_patch_grid, compute_cell_moments
-from haci.seed import relative_energy
 from haci.renderer import (
     compute_render_features,
     render_boundary_map_torch,
@@ -149,12 +148,6 @@ def run_l0_l1(img_path, device, metric=None, notch=None, gain=None, *, kappa_vm)
 
     rho_total_grid = cells["rho_total"].astype(np.float64, copy=True)
     rho_peak_grid = cells["rho_peak"].astype(np.float64, copy=True)
-    E_rel_grid = relative_energy(
-        torch.from_numpy(rho_total_grid.astype(np.float32)),
-        nH,
-        nW,
-        SEED.EPS,
-    ).numpy().astype(np.float64)
     cx_grid = cells["cx"].astype(np.float64, copy=True)
     cy_grid = cells["cy"].astype(np.float64, copy=True)
     is_border_grid = cells["is_border"].copy()
@@ -175,7 +168,6 @@ def run_l0_l1(img_path, device, metric=None, notch=None, gain=None, *, kappa_vm)
         "nW": nW,
         "rho_total_grid": rho_total_grid,
         "rho_peak_grid": rho_peak_grid,
-        "E_rel_grid": E_rel_grid,
         "cx_grid": cx_grid,
         "cy_grid": cy_grid,
         "is_border_grid": is_border_grid,

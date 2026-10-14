@@ -557,6 +557,7 @@ def upgrade_model_state_dict(state_dict: dict) -> dict:
         "seed._a_raw",
         "seed._b_raw",
         "l0_gain._w_scale_raw",
+        "seed._kappa_theta_raw",
     }
     rename = {
         "seed._beta_raw": "seed._beta_seed_raw",
@@ -616,7 +617,7 @@ def debug_seed_batch(
     print(
         f"\n  κ_vm={seed.kappa_vm.item():.4g}  η_z={seed.eta_z.item():.4g}  "
         f"β_seed={seed.beta_seed.item():.4g}  β_coll={seed.beta_coll.item():.4g}  "
-        f"κ_θ={seed.kappa_theta.item():.4g}  η_readout={seed.eta_readout.item():.4g}  "
+        f"η_readout={seed.eta_readout.item():.4g}  "
         f"λ={seed.lam.item():.4g}  σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}"
     )
     for name, t in (
@@ -624,7 +625,6 @@ def debug_seed_batch(
         ("η_z", seed._eta_z_raw),
         ("β_seed", seed._beta_seed_raw),
         ("β_coll", seed._beta_coll_raw),
-        ("κ_θ", seed._kappa_theta_raw),
         ("η_readout", seed._eta_readout_raw),
         ("λ", seed._lambda_raw),
         ("σ_f", seed._sigma_f_raw),
@@ -712,7 +712,7 @@ def format_l1_param_lines(model: HaCIE2E, *, indent: str = "  ") -> list[str]:
 def format_seed_param_lines(seed, *, indent: str = "  ") -> list[str]:
     lines = [
         f"{indent}η_z={seed.eta_z.item():.4g}  β_seed={seed.beta_seed.item():.4g}  "
-        f"β_coll={seed.beta_coll.item():.4g}  κ_θ={seed.kappa_theta.item():.4g}",
+        f"β_coll={seed.beta_coll.item():.4g}",
         f"{indent}η_readout={seed.eta_readout.item():.4g}  λ={seed.lam.item():.4g}  "
         f"σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}  R={seed.cross_surround_radius}",
         f"{indent}κ_a={seed.kappa_a.item():.4g}  β_gap={seed.beta_gap.item():.4g}  "
