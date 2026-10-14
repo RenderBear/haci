@@ -18,6 +18,7 @@ from hci.L0 import (
     load_image,
     compute_l0_rgb,
     compute_interior,
+    L0GainControl,
     L0LearnedMetric,
     L0Notch,
 )
@@ -82,6 +83,7 @@ def build_l0_pix_live(
     metric: L0LearnedMetric,
     device: torch.device,
     notch: L0Notch | None = None,
+    gain: L0GainControl | None = None,
 ) -> dict[str, torch.Tensor]:
     if not isinstance(img, torch.Tensor):
         img = torch.as_tensor(np.asarray(img), dtype=torch.float32)
@@ -95,6 +97,7 @@ def build_l0_pix_live(
         offsets=L0.OFFSETS,
         metric=metric,
         notch=notch,
+        gain=gain,
     )
     z1_re, z1_im = s[..., 0], s[..., 1]
     z2_re, z2_im = s[..., 2], s[..., 3]
@@ -185,83 +188,6 @@ def run_moments_cells_flat(
 run_l1_cells_flat = run_moments_cells_flat
 
 
-def _lerp_axis(x: torch.Tensor, pos: torch.Tensor, dim: int) -> torch.Tensor:
-    """Linear interpolation of x along dim at fractional indices pos, clamped to the ends."""
-    n = x.shape[dim]
-    pos = pos.clamp(0, n - 1)
-    i0 = pos.floor().long()
-    i1 = (i0 + 1).clamp(max=n - 1)
-    shape = [1] * x.dim()
-    shape[dim] = -1
-    w = (pos - i0).view(shape)
-    return x.index_select(dim, i0) * (1.0 - w) + x.index_select(dim, i1) * w
-
-
-def coarse_rho_bins(
-    img: torch.Tensor,
-    H0: int,
-    W0: int,
-    nH: int,
-    nW: int,
-    scales: tuple[int, ...],
-    metric: L0LearnedMetric,
-    device: torch.device,
-    notch: L0Notch | None = None,
-    *,
-    kappa_vm: torch.Tensor | float,
-) -> torch.Tensor:
-    r"""Per-bin drive at coarser scales, on the fine cell grid: (len(scales), nH·nW, K).
-
-    For each factor f the image is f×f average-pooled and passed through the same L0 → L1 as the
-    full-resolution image (same weights), so a coarse cell covers f× the footprint of a fine one.
-    The coarse grid is then sampled bilinearly at the fine cell centres.
-    """
-    P = int(L1.PATCH_SIZE)
-    S = stride_from_patch_overlap(P, L1.PATCH_OVERLAP)
-    K = int(getattr(L1, "NUM_ORIENT_BINS", 8))
-    if not isinstance(img, torch.Tensor):
-        img = torch.as_tensor(np.asarray(img), dtype=torch.float32)
-    x = img.to(device=device, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0)
-    cy = torch.arange(nH, device=device, dtype=torch.float32) * S + P / 2.0
-    cx = torch.arange(nW, device=device, dtype=torch.float32) * S + P / 2.0
-    out = []
-    for f in scales:
-        xc = F.avg_pool2d(x, int(f))
-        Hc, Wc = int(xc.shape[-2]), int(xc.shape[-1])
-        if min(Hc, Wc) < P:
-            out.append(torch.zeros(nH * nW, K, device=device))
-            continue
-        # Reflect-pad to a whole number of patches, as pad_for_patch_grid does at full resolution.
-        Hpc = ((Hc - P + S - 1) // S) * S + P
-        Wpc = ((Wc - P + S - 1) // S) * S + P
-        xc = F.pad(xc, (0, Wpc - Wc, 0, Hpc - Hc), mode="reflect")
-        bm = ~compute_interior(Hpc, Wpc, device)
-        l0_c = build_l0_pix_live(xc.squeeze(0).permute(1, 2, 0), bm, metric, device, notch=notch)
-        cf_c = run_moments_cells_flat(
-            l0_c, bm, H0 // int(f), W0 // int(f), device, kappa_vm=kappa_vm,
-        )
-        nHc, nWc = int(cf_c["nH"]), int(cf_c["nW"])
-        rho_c = cf_c["rho_bin"].reshape(nHc, nWc, K).permute(2, 0, 1).unsqueeze(0)
-        # A fine cell centred at pixel c sits at coarse-grid index (c / f − P/2) / S.
-        iy = (cy / f - P / 2.0) / S
-        ix = (cx / f - P / 2.0) / S
-        if rho_c.device.type == "mps":
-            # grid_sample has no backward on MPS. The grid is separable, so the same bilinear
-            # sample with border clamping is one interpolation per axis.
-            up = _lerp_axis(_lerp_axis(rho_c, iy, dim=2), ix, dim=3)
-        else:
-            gy = iy / max(nHc - 1, 1) * 2.0 - 1.0
-            gx = ix / max(nWc - 1, 1) * 2.0 - 1.0
-            grid = torch.stack(
-                [gx.view(1, nW).expand(nH, nW), gy.view(nH, 1).expand(nH, nW)], dim=-1,
-            ).unsqueeze(0)
-            up = F.grid_sample(
-                rho_c, grid, mode="bilinear", padding_mode="border", align_corners=True,
-            )
-        out.append(up.squeeze(0).permute(1, 2, 0).reshape(nH * nW, K))
-    return torch.stack(out, dim=0)
-
-
 def build_cells_flat(cells: dict) -> dict:
     nH, nW = cells["nH"], cells["nW"]
     N = nH * nW
@@ -306,14 +232,14 @@ class HCIE2E(nn.Module):
     def __init__(
         self,
         eps: float = SEED.EPS,
-        scales: tuple[int, ...] = tuple(SEED.SCALES),
         **kw,
     ):
         super().__init__()
         _ = kw
         self.l0_metric = L0LearnedMetric()
         self.l0_notch = L0Notch() if bool(getattr(L0, "NOTCH_ENABLED", False)) else None
-        self.seed = AndGateSeed(eps=eps, scales=scales)
+        self.l0_gain = L0GainControl()
+        self.seed = AndGateSeed(eps=eps)
         self.renderer = ModulationRenderer()
         self.eps = eps
         self.render_eps = max(float(eps), 1e-6)
@@ -351,7 +277,8 @@ def prepare_batch(items, device, model: HCIE2E):
                 "rebuild cache (L0_CACHE_VERSION bump)."
             )
         l0_dev = build_l0_pix_live(
-            img, border_mask, model.l0_metric, device, notch=model.l0_notch,
+            img, border_mask, model.l0_metric, device,
+            notch=model.l0_notch, gain=model.l0_gain,
         )
         cf_dev = run_moments_cells_flat(
             l0_dev,
@@ -361,12 +288,6 @@ def prepare_batch(items, device, model: HCIE2E):
             device,
             kappa_vm=model.seed.kappa_vm,
         )
-        if model.seed.scales:
-            cf_dev["rho_bin_coarse"] = coarse_rho_bins(
-                img, H0, W0, cf_dev["nH"], cf_dev["nW"], model.seed.scales,
-                model.l0_metric, device, notch=model.l0_notch,
-                kappa_vm=model.seed.kappa_vm,
-            )
         p_dev = proj_to_device(gi, device)
         meta.append(
             {
@@ -652,12 +573,6 @@ def upgrade_model_state_dict(state_dict: dict) -> dict:
     return out
 
 
-def scales_from_state_dict(state_dict: dict) -> tuple[int, ...]:
-    """Coarse scales a checkpoint was trained with; empty for a single-scale checkpoint."""
-    sf = state_dict.get("seed.scale_factors")
-    return tuple(int(s) for s in sf.tolist()) if sf is not None else ()
-
-
 def debug_seed_batch(
     model,
     meta_list,
@@ -715,7 +630,10 @@ def debug_seed_batch(
         ("σ_S", seed._sigma_s_raw),
         ("κ_a", seed._kappa_a_raw),
         ("β_gap", seed._beta_gap_raw),
-        *((("β_scale", seed._beta_scale_raw),) if seed.scales else ()),
+        ("σ_κ", seed._sigma_kappa_raw),
+        ("L0 λ", model.l0_gain._lambda_raw),
+        ("L0 σ_r", model.l0_gain._pool_sigma_raw),
+        *((("L0 w_scale", model.l0_gain._w_scale_raw),) if model.l0_gain._w_scale_raw.numel() else ()),
     ):
         if t.grad is None:
             print(f"  |grad| {name}: grad=None")
@@ -777,6 +695,13 @@ def format_l0_param_lines(model: HCIE2E, *, indent: str = "  ") -> list[str]:
             f"{indent}notch: w_n={n.omega_n.item():.3g}  "
             f"σ_n={n.sigma_n.item():.3g}  d={n.d.item():.3g}  L={2 * n.H + 1}",
         ])
+    g = model.l0_gain
+    ws = "  ".join(f"w[{f}]={float(v):.4g}" for f, v in zip(g.scales[1:], g.w_scale.tolist()))
+    lines.extend([
+        "",
+        f"{indent}gain: scales={g.scales}  λ={g.lam.item():.4g}  "
+        f"σ_r={g.pool_sigma.item():.4g}  {ws}",
+    ])
     return lines
 
 
@@ -792,14 +717,9 @@ def format_seed_param_lines(seed, *, indent: str = "  ") -> list[str]:
         f"β_coll={seed.beta_coll.item():.4g}  κ_θ={seed.kappa_theta.item():.4g}",
         f"{indent}η_readout={seed.eta_readout.item():.4g}  λ={seed.lam.item():.4g}  "
         f"σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}  R={seed.cross_surround_radius}",
-        f"{indent}κ_a={seed.kappa_a.item():.4g}  β_gap={seed.beta_gap.item():.4g}",
+        f"{indent}κ_a={seed.kappa_a.item():.4g}  β_gap={seed.beta_gap.item():.4g}  "
+        f"σ_κ={seed.sigma_kappa.item():.4g}",
     ]
-    if seed.scales:
-        lines.append(
-            indent + "  ".join(
-                f"β_scale[1/{f}]={b:.4g}" for f, b in zip(seed.scales, seed.beta_scale.tolist())
-            )
-        )
     return lines
 
 def format_renderer_param_lines(r, *, indent: str = "  ") -> list[str]:
@@ -826,6 +746,7 @@ def format_model_param_counts(model: HCIE2E) -> tuple[int, int, int, int]:
     n_l0 = sum(p.numel() for p in model.l0_metric.parameters())
     if model.l0_notch is not None:
         n_l0 += sum(p.numel() for p in model.l0_notch.parameters())
+    n_l0 += sum(p.numel() for p in model.l0_gain.parameters())
     n_seed = sum(p.numel() for p in model.seed.parameters())
     n_renderer = sum(p.numel() for p in model.renderer.parameters())
     n_total = sum(p.numel() for p in model.parameters())
@@ -904,7 +825,7 @@ def main():
     ap.add_argument(
         "--debug-seed",
         action="store_true",
-        help="Run one batch, print seed stats and β_seed/β_coll/κ_θ/η_z/η_readout/λ/σ_f/β_scale gradients, then exit",
+        help="Run one batch, print seed stats and seed / L0 gain-control gradients, then exit",
     )
     ap.add_argument(
         "--resume",
@@ -959,18 +880,10 @@ def main():
         return
     print(f"  training on all {len(fit_stems)}")
 
-    scales = tuple(SEED.SCALES)
+    model = HCIE2E(eps=SEED.EPS).to(device)
     if resume is not None:
         resume_sd = upgrade_model_state_dict(resume["model_state"])
         resume_sd = upgrade_renderer_state_dict(resume_sd, prefix="renderer.")
-        # Keep the scales the checkpoint was trained with, as test and infer do.
-        scales = scales_from_state_dict(resume_sd)
-
-    model = HCIE2E(
-        eps=SEED.EPS,
-        scales=scales,
-    ).to(device)
-    if resume is not None:
         incompatible = model.load_state_dict(resume_sd, strict=False)
         report_checkpoint_compatibility(incompatible, context="train --resume")
 
@@ -993,7 +906,7 @@ def main():
         optimizer, T_max=args.epochs, eta_min=args.lr * 0.1, last_epoch=start_epoch - 1
     )
 
-    print(f"\nmodel: {format_model_param_summary(model)}  scales={(1, *model.seed.scales)}")
+    print(f"\nmodel: {format_model_param_summary(model)}  L0 scales={model.l0_gain.scales}")
 
     train_ds = HCIDataset(train_cache, fit_stems)
     train_loader = DataLoader(

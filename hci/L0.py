@@ -407,6 +407,156 @@ def _naka_squared(
     return m_sq / (eta_sq + m_sq)
 
 
+def _gaussian_1d(
+    sigma: float | torch.Tensor, radius: int, device: torch.device, dtype: torch.dtype,
+) -> torch.Tensor:
+    r = torch.arange(-radius, radius + 1, device=device, dtype=dtype)
+    if isinstance(sigma, torch.Tensor):
+        sig_sq = (sigma * sigma).clamp_min(1e-6)
+    else:
+        sig_sq = max(float(sigma) ** 2, 1e-6)
+    g = torch.exp(-(r * r) / (2.0 * sig_sq))
+    return g / g.sum()
+
+
+def _blur_hwc(x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
+    """Separable blur of each channel of an (H, W, C) map with the 1D kernel g, reflect-padded."""
+    R = (g.shape[0] - 1) // 2
+    H, W, C = x.shape
+    y = x.permute(2, 0, 1).unsqueeze(1)
+    y = F.pad(y, (R, R, R, R), mode="reflect" if R < min(H, W) else "replicate")
+    y = F.conv2d(y, g.view(1, 1, 1, -1))
+    y = F.conv2d(y, g.view(1, 1, -1, 1))
+    return y.squeeze(1).permute(1, 2, 0)
+
+
+def _compute_m_sq_lum_chroma_step(
+    u: torch.Tensor,
+    offsets: list[tuple[int, int]],
+    step: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """``_compute_m_sq_lum_chroma`` at offsets scaled by ``step``: m[p] = u[p − step·o] − u[p].
+
+    The image is reflect-padded rather than zero-filled at the border, so the step-pixel band along
+    each edge keeps all eight directions instead of picking up a spurious orientation.
+    """
+    H, W, _ = u.shape
+    s = int(step)
+    x = F.pad(u.permute(2, 0, 1).unsqueeze(0), (s, s, s, s), mode="reflect")
+    x = x.squeeze(0).permute(1, 2, 0)
+    c = x[s : s + H, s : s + W]
+    m_lum_sq, m_chr_sq = [], []
+    for dy, dx in offsets:
+        r0, c0 = s - dy * s, s - dx * s
+        diff = x[r0 : r0 + H, c0 : c0 + W] - c
+        m_lum_sq.append(diff[..., 0].square())
+        m_chr_sq.append(diff[..., 1:].square().sum(dim=-1))
+    return torch.stack(m_lum_sq, dim=-1), torch.stack(m_chr_sq, dim=-1)
+
+
+class L0GainControl(nn.Module):
+    r"""Contrast gain control over direction, scale and space.
+
+    The drive at scale s is the directional difference at offset s·o_k, taken on the image blurred
+    with σ = SCALE_BLUR·√(s² − 1) so each coarser scale is band-pass; scale 1 is the unblurred
+    one-pixel drive. Each channel (luminance, chroma) is divided by its own pool:
+
+        h_{k,s} = m²_{k,s} / (η² + m²_{k,s} + λ · G_r ∗ Σ_{k',s'} m²_{k',s'})
+
+    The pool spans every direction and scale, and G_r spreads it over space. The harmonics are
+    linear in h, so the scales combine there: z_n = Σ_s w_s Σ_k h_{k,s} e^{inφ_k}, w_1 = 1.
+
+    λ ≈ 0 and w_s ≈ 0 at init, so the model starts as the single-scale, per-direction L0. η itself
+    is not learned here: only m/η enters, and the metric's channel gains already scale m.
+    """
+
+    def __init__(
+        self,
+        *,
+        scales: tuple[int, ...] | None = None,
+        scale_blur: float | None = None,
+        scale_weight_init: float | None = None,
+        lambda_init: float | None = None,
+        pool_sigma_init: float | None = None,
+        pool_radius: int | None = None,
+    ) -> None:
+        super().__init__()
+        P = _L0_PARAMS
+        scales = tuple(int(s) for s in (scales if scales is not None else getattr(P, "SCALES", (1,))))
+        if not scales or scales[0] != 1 or any(s < 1 for s in scales) or len(set(scales)) != len(scales):
+            raise ValueError(f"L0 scales must start at 1 and be distinct, got {scales}")
+        self.scales = scales
+        self.scale_blur = float(scale_blur if scale_blur is not None else getattr(P, "SCALE_BLUR", 0.5))
+        self.pool_radius = int(pool_radius if pool_radius is not None else getattr(P, "POOL_RADIUS", 16))
+        w0 = float(scale_weight_init if scale_weight_init is not None else getattr(P, "SCALE_WEIGHT_INIT", 1e-3))
+        lam0 = float(lambda_init if lambda_init is not None else getattr(P, "POOL_LAMBDA_INIT", 1e-5))
+        sr0 = float(pool_sigma_init if pool_sigma_init is not None else getattr(P, "POOL_SIGMA_INIT", 2.0))
+        self._lambda_raw = nn.Parameter(torch.tensor(_softplus_inv(lam0), dtype=torch.float32))
+        self._pool_sigma_raw = nn.Parameter(torch.tensor(_softplus_inv(sr0), dtype=torch.float32))
+        self._w_scale_raw = nn.Parameter(
+            torch.full((len(self.scales) - 1,), _softplus_inv(w0), dtype=torch.float32)
+        )
+
+    @property
+    def lam(self) -> torch.Tensor:
+        return F.softplus(self._lambda_raw)
+
+    @property
+    def pool_sigma(self) -> torch.Tensor:
+        return F.softplus(self._pool_sigma_raw)
+
+    @property
+    def w_scale(self) -> torch.Tensor:
+        """Weights of the coarse scales (scales[1:]); scale 1 has weight 1."""
+        return F.softplus(self._w_scale_raw)
+
+    def forward(
+        self,
+        u_tilde: torch.Tensor,
+        offsets: list[tuple[int, int]],
+        *,
+        eta_lum: float,
+        eta_chr: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        dev, dt = u_tilde.device, u_tilde.dtype
+        m_sq = []
+        for s in self.scales:
+            if s == 1:
+                m_sq.append(_compute_m_sq_lum_chroma(u_tilde, offsets))
+                continue
+            sig_b = self.scale_blur * math.sqrt(s * s - 1.0)
+            g_b = _gaussian_1d(sig_b, max(1, math.ceil(3.0 * sig_b)), dev, dt)
+            m_sq.append(_compute_m_sq_lum_chroma_step(_blur_hwc(u_tilde, g_b), offsets, s))
+
+        pool = torch.stack(
+            [sum(ml.sum(dim=-1) for ml, _ in m_sq), sum(mc.sum(dim=-1) for _, mc in m_sq)], dim=-1,
+        )
+        pool = _blur_hwc(pool, _gaussian_1d(self.pool_sigma, self.pool_radius, dev, dt))
+        lam = self.lam
+        base_lum = float(eta_lum) * float(eta_lum) + lam * pool[..., 0:1]
+        base_chr = float(eta_chr) * float(eta_chr) + lam * pool[..., 1:2]
+
+        w = self.w_scale
+        h_lum = h_chr = None
+        for i, (ml, mc) in enumerate(m_sq):
+            hl = ml / (base_lum + ml)
+            hc = mc / (base_chr + mc)
+            if i:
+                hl = w[i - 1] * hl
+                hc = w[i - 1] * hc
+            h_lum = hl if h_lum is None else h_lum + hl
+            h_chr = hc if h_chr is None else h_chr + hc
+        return h_lum, h_chr
+
+    def extra_repr(self) -> str:
+        with torch.no_grad():
+            ws = ", ".join(f"1/{s}: {float(v):.4g}" for s, v in zip(self.scales[1:], self.w_scale))
+            return (
+                f"scales={self.scales}, λ={float(self.lam):.4g}, "
+                f"σ_r={float(self.pool_sigma):.4g}, w=[{ws}]"
+            )
+
+
 def _naka_per_direction(
     d: torch.Tensor,
     eta: float,
@@ -480,7 +630,8 @@ def _compute_l0_rgb_notched(
     gamma: float,
     offsets: list[tuple[int, int]],
     metric: L0LearnedMetric | None,
-    notch: L0Notch,
+    notch: L0Notch | None,
+    gain: L0GainControl | None = None,
 ) -> tuple[
     torch.Tensor,
     torch.Tensor,
@@ -496,11 +647,13 @@ def _compute_l0_rgb_notched(
     H, W, _ = img_rgb.shape
     device = img_rgb.device
     u = _project_image_rgb(img_rgb, metric)
-    u_tilde = notch.filter_channels(u)
-    m_lum_sq, m_chr_sq = _compute_m_sq_lum_chroma(u_tilde, offsets)
-
-    h_lum = _naka_squared(m_lum_sq, eta_lum)
-    h_chr = _naka_squared(m_chr_sq, eta_chr)
+    u_tilde = notch.filter_channels(u) if notch is not None else u
+    if gain is None:
+        m_lum_sq, m_chr_sq = _compute_m_sq_lum_chroma(u_tilde, offsets)
+        h_lum = _naka_squared(m_lum_sq, eta_lum)
+        h_chr = _naka_squared(m_chr_sq, eta_chr)
+    else:
+        h_lum, h_chr = gain(u_tilde, offsets, eta_lum=eta_lum, eta_chr=eta_chr)
     h = h_lum + h_chr
 
     vld = compute_valid(H, W, offsets, device)
@@ -526,6 +679,7 @@ def compute_l0_rgb(
     offsets: list[tuple[int, int]],
     metric: L0LearnedMetric | None = None,
     notch: L0Notch | None = None,
+    gain: L0GainControl | None = None,
 ) -> tuple[
     torch.Tensor,
     torch.Tensor,
@@ -547,7 +701,7 @@ def compute_l0_rgb(
     eta_c = resolve_eta(eta_chr)
     gamma_used = float(gamma)
 
-    if notch is not None:
+    if notch is not None or gain is not None:
         return _compute_l0_rgb_notched(
             img_rgb,
             eta_lum=eta_l,
@@ -556,6 +710,7 @@ def compute_l0_rgb(
             offsets=offsets,
             metric=metric,
             notch=notch,
+            gain=gain,
         )
 
     vld = compute_valid(H, W, offsets, device)
@@ -617,6 +772,7 @@ def run_l0(
     verbose: bool = True,
     metric: L0LearnedMetric | None = None,
     notch: L0Notch | None = None,
+    gain: L0GainControl | None = None,
 ) -> dict:
     H, W = ir.shape[:2]
     device = ir.device
@@ -644,6 +800,7 @@ def run_l0(
             offsets=offsets,
             metric=metric,
             notch=notch,
+            gain=gain,
         )
         eta_used_print = float(eta_l)
     else:

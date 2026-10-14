@@ -20,6 +20,17 @@ L0 = SimpleNamespace(
     NOTCH_OMEGA_N_INIT=1.0 / 8,
     NOTCH_SIGMA_N_INIT=1.0 / 32,
     NOTCH_D_INIT=0.8,
+    # Contrast gain control (L0GainControl): the drive at each offset scale s in SCALES (on the
+    # image blurred with σ = SCALE_BLUR·√(s²−1)) is divided by η² + its own energy + λ·G_r ∗
+    # (energy pooled over directions and scales); coarse scales sum in the harmonics, one weight
+    # each. λ and the weights start ≈ 0, i.e. the per-direction L0. G_r is truncated at
+    # POOL_RADIUS px. Trained with (1, 2, 4), the coarse weights stayed ≈ 0.02, so scale 1 only.
+    SCALES=(1,),
+    SCALE_BLUR=0.5,
+    SCALE_WEIGHT_INIT=1e-3,
+    POOL_LAMBDA_INIT=1e-5,
+    POOL_SIGMA_INIT=2.0,
+    POOL_RADIUS=16,
 )
 
 # ── L1: patch geometry + z₂ orientation bins (von Mises on θ_p) ───────────
@@ -32,7 +43,7 @@ L1 = SimpleNamespace(
     KAPPA_VM_INIT=2.0,
 )
 
-# ── Seed: η_z NR on |Z|, then collinear + cross-scale + surround + divisive readout (η_readout) ─
+# ── Seed: η_z NR on |Z|, then co-circular + surround + divisive readout (η_readout) ─
 SEED = SimpleNamespace(
     EPS=1e-9,
     ETA_Z_INIT=10.0,
@@ -45,16 +56,18 @@ SEED = SimpleNamespace(
     SIGMA_F_MIN=1.0,
     KAPPA_A_INIT=8.0,
     BETA_GAP_INIT=0.5,
-    # Cross-scale facilitation: L0 → L1 re-run on the image pooled by each factor in SCALES,
-    # one learned gain per scale. () trains a single-scale model.
-    SCALES=(2, 4),
-    BETA_SCALE_INIT=0.25,
+    # Co-circular association field: bins couple along circles whose curvature is within the
+    # learned tolerance σ_κ (1/cell). σ_κ ≈ 0 at init is the same-bin collinear term.
+    SIGMA_KAPPA_INIT=1e-2,
     FACIL_RADIUS=5,
     FACIL_MODE="collinear",
-    CROSS_SURROUND_RADIUS=10,
+    # Readout pool: each orientation bin divided by the same bin's neighbouring cells (centre
+    # excluded), Gaussian σ_s in cells. Replaced the sin²Δθ cross-orientation pool, which at broad κ_vm
+    # read an edge's own energy; σ_s ≈ 1 ranked candidates best on the trained model.
+    SURROUND_RADIUS=10,
     SURROUND_SIGMA=2.0,
     SURROUND_MODE="broadside",
-    SIGMA_S_INIT=2.0,
+    SIGMA_S_INIT=1.0,
     RHO_STE_TAU=0.1,
 )
 
@@ -89,7 +102,7 @@ RENDER = SimpleNamespace(
 # ── Training ───────────────────────────────────────────────────────────────
 TRAIN = SimpleNamespace(
     LR=5e-2,
-    EPOCHS=30,
+    EPOCHS=50,
     BATCH_SIZE=4,
     GRAD_CLIP=1.0,
     NUM_WORKERS=0,

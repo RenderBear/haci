@@ -3,13 +3,13 @@
 A compact, fully distributed algorithm that extracts edges from RGB images through four stages:
 
 1. **L0 — pixel harmonic contrast**  
-   Each pixel is compared to its eight neighbors in a learned luminance/chroma metric. The result is a per-pixel harmonic field.
+   Each pixel is compared to its eight neighbors in a learned luminance/chroma metric. Each direction's contrast is divided by its own energy plus a learned spatial pool of local contrast (contrast gain control). The result is a per-pixel harmonic field.
 
 2. **L1 — oriented pooling**  
-   L0 harmonics are summed over small, overlapping patches on a sparse cell grid. Each cell gets a dominant orientation `θ`.
+   L0 harmonics are summed over small, overlapping patches on a sparse cell grid. Each cell gets eight orientation-tuned responses and a dominant orientation `θ`.
 
 3. **Seed — facilitation and suppression**  
-   Cell responses pass through Naka–Rushton gain control, collinear support along contours, cross-scale support, and cross-orientation surround suppression. Collinear support scales each cell's own response and bridges gaps that have support on both sides. Cross-scale support re-runs L0 and L1 on the image pooled 2× and 4×, and strengthens a cell when the same orientation responds at those coarser scales. A divisive readout yields per-cell contour density `ρ`.
+   Each orientation response passes through Naka–Rushton gain control. Support from neighbouring cells along the contour (an association field with a learned curvature tolerance) scales the response and bridges gaps that have support on both sides. A divisive readout then divides each orientation response by the same orientation's response in the neighbouring cells, so a cell is coded relative to its same-orientation context. The result is per-cell contour density `ρ`.
 
 4. **Render — ridge back-projection**  
    Cell `ρ` is splatted back to full resolution with learned 1D kernels aligned to local `θ`, producing a soft boundary map. Non-max suppression yields the final edge map.
@@ -29,18 +29,20 @@ A compact, fully distributed algorithm that extracts edges from RGB images throu
 
 Scores for `pretrained/final.pt` on the BRIND test set (200 images; the model was trained on the 300-image BRIND train split). Evaluation uses the Berkeley boundary benchmark: 99 thresholds and `maxDist` 0.0075 (≈4.3 px on 481×321 images). Predictions are thinned before one-to-one matching; see [Test](#test).
 
-| Output | ODS | OIS | AP |
-| --- | --- | --- | --- |
-| NMS-thinned map (`s_eval`) | 0.7022 | 0.7267 | 0.7346 |
-| Raw soft map (`c_eval`) | 0.6991 | 0.7223 | 0.6148 |
+| Output | ODS | Precision | Recall | OIS | AP |
+| --- | --- | --- | --- | --- | --- |
+| NMS-thinned map (`s_eval`) | 0.7024 | 0.6664 | 0.7426 | 0.7274 | 0.7487 |
+| Raw soft map (`c_eval`) | 0.6995 | 0.6716 | 0.7299 | 0.7232 | 0.6609 |
+
+Precision and recall are taken at the ODS threshold (0.72 for both maps).
 
 Speed and memory, measured on MPS (Apple M4) with `baselines/speed.py`. 
 
 | Resolution | Time | Host memory | GPU memory |
 | --- | --- | --- | --- |
-| 481×321 | 80 ms | 157 MB | 1.2 GB |
-| 1280×720 | 231 ms | 213 MB | 1.2 GB |
-| 1920×1080 | 546 ms | 280 MB | 3.3 GB |
+| 481×321 | 52 ms | 126 MB | 1.2 GB |
+| 1280×720 | 195 ms | 177 MB | 1.2 GB |
+| 1920×1080 | 433 ms | 240 MB | 2.2 GB |
 
 ## Structure
 
@@ -54,9 +56,9 @@ HCI/
 ├── infer.py                 # single-image inference + diagnostics
 ├── scripts/                 # biped.sh, brind.sh, nyud.sh — fetch and lay out datasets
 ├── hci/
-│   ├── L0.py                # pixel-level contrast
+│   ├── L0.py                # pixel-level contrast + gain control
 │   ├── L1.py                # cell-level z₂ moments (E, C, θ)
-│   ├── seed.py              # η_z NR + collinear + cross-scale + surround → cell ρ for splat
+│   ├── seed.py              # η_z NR + association field + same-orientation surround → cell ρ for splat
 │   ├── renderer.py          # learned ridge projection
 │   ├── splat_metal.py       # the renderer's splat as Metal kernels, used with --device mps
 │   ├── boundary_bench.py    # Berkeley boundary benchmark (ODS, OIS, AP)
@@ -155,7 +157,7 @@ Outputs go to `--output_dir` (default: `output/results/`). Add `-d` / `--diagnos
 
 ### Pretrained model
 
-A pretrained checkpoint is included at `pretrained/final.pt` (learned L0 metric, seed, renderer). It's the default `--model` for **infer** and **test**, so you can run them without training your own weights. `test` and `train` default to BRIND in `data/`, which `scripts/brind.sh` creates:
+A pretrained checkpoint is included at `pretrained/final.pt` (learned L0 metric and gain control, seed, renderer). It's the default `--model` for **infer** and **test**, so you can run them without training your own weights. `test` and `train` default to BRIND in `data/`, which `scripts/brind.sh` creates:
 
 ```bash
 # inference
@@ -176,11 +178,9 @@ Trains on BRIND in `data/train` by default:
 uv run train
 ```
 
-Main flags: `--train_imgs`, `--train_gt`, `--gt_format` (`png` / `mat`; auto-detected from the GT folder if omitted), `--epochs` (default `20`), `--lr` (default `5e-2`), `--batch_size`, `-n` (cap the number of images), `--device`, `--output_dir`, `--checkpoints_dir`, `--cache_dir`, `--num_workers` (default `0`: cached items load in milliseconds, and starting worker processes each epoch costs more than it saves), `--grad_clip`, `--gt_min_agreement`, `--resume`. `--debug-seed` runs one batch and prints the seed's parameters and gradients.
+Main flags: `--train_imgs`, `--train_gt`, `--gt_format` (`png` / `mat`; auto-detected from the GT folder if omitted), `--epochs` (default `50`), `--lr` (default `5e-2`), `--batch_size`, `-n` (cap the number of images), `--device`, `--output_dir`, `--checkpoints_dir`, `--cache_dir`, `--num_workers` (default `0`: cached items load in milliseconds, and starting worker processes each epoch costs more than it saves), `--grad_clip`, `--gt_min_agreement`, `--resume`. `--debug-seed` runs one batch and prints the seed's parameters and gradients.
 
 To continue an interrupted run, add `--resume`: it loads `intermediate.pt` from `--checkpoints_dir` (or the path you give it) and picks up at the next epoch.
-
-Training also uses coarser scales. `SEED.SCALES` in `params.py` lists the pooling factors, `(2, 4)` by default, and training learns one gain per scale. Set it to `()` to train at full resolution only. A checkpoint records the scales it was trained with, so `test` and `infer` follow whichever checkpoint they load.
 
 ### BIPED
 

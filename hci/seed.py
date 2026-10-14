@@ -1,4 +1,4 @@
-r"""Cell-grid contour seed — per-orientation-bin NR, collinear, cross-scale, B-weighted surround, readout"""
+r"""Cell-grid contour seed — per-orientation-bin NR, co-circular association field, same-orientation surround, readout"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ except Exception:  # pragma: no cover
     class SEED:  # type: ignore
         EPS = 1e-6
         ETA_Z_INIT = 0.30
-        CROSS_SURROUND_RADIUS = 5
+        SURROUND_RADIUS = 5
         SURROUND_SIGMA = 2.0
         RHO_STE_TAU = 0.1
 
@@ -36,15 +36,13 @@ _SIGMA_S_INIT = float(getattr(SEED, "SIGMA_S_INIT", getattr(SEED, "SURROUND_SIGM
 _KAPPA_VM_INIT = float(getattr(L1, "KAPPA_VM_INIT", 2.0))
 _K = int(getattr(L1, "NUM_ORIENT_BINS", 8))
 _FACIL_RADIUS = int(getattr(SEED, "FACIL_RADIUS", 2))
-_CROSS_SURROUND_RADIUS = int(
-    getattr(SEED, "CROSS_SURROUND_RADIUS", getattr(SEED, "SURROUND_RADIUS", 5))
-)
+_SURROUND_RADIUS = int(getattr(SEED, "SURROUND_RADIUS", 5))
 _SURROUND_SIGMA = float(getattr(SEED, "SURROUND_SIGMA", 2.0))
 _RHO_STE_TAU = float(getattr(SEED, "RHO_STE_TAU", 0.1))
 _SIGMA_F_MIN = float(getattr(SEED, "SIGMA_F_MIN", 1.0))
 _KAPPA_A_INIT = float(getattr(SEED, "KAPPA_A_INIT", 8.0))
 _BETA_GAP_INIT = float(getattr(SEED, "BETA_GAP_INIT", 0.5))
-_BETA_SCALE_INIT = float(getattr(SEED, "BETA_SCALE_INIT", 0.25))
+_SIGMA_KAPPA_INIT = float(getattr(SEED, "SIGMA_KAPPA_INIT", 1e-2))
 
 
 def _inv_softplus(x: float) -> float:
@@ -56,12 +54,6 @@ def _inv_softplus(x: float) -> float:
 
 def orientation_bin_centers(K: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
     return torch.arange(K, device=device, dtype=dtype) * (math.pi / float(K))
-
-
-def orientation_B_matrix(K: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-    t = orientation_bin_centers(K, device, dtype).view(K, 1)
-    d = t - t.t()
-    return torch.sin(d) ** 2
 
 
 def _surround_kernel(
@@ -105,7 +97,7 @@ def relative_energy(
     nW: int,
     eps: float,
     *,
-    radius: int = _CROSS_SURROUND_RADIUS,
+    radius: int = _SURROUND_RADIUS,
     sigma: float = _SURROUND_SIGMA,
 ) -> torch.Tensor:
     nb = surround_mean(rho_total, nH, nW, radius=radius, sigma=sigma)
@@ -247,20 +239,28 @@ def _gaussian_exponent(
     return torch.exp(-d2 / (2.0 * sigma_sq.clamp_min(1e-12)))
 
 
-def bipole_facilitation_bins(
+def cocircular_bipole_bins(
     rho_nr: torch.Tensor,
     bar_theta: torch.Tensor,
     *,
     sigma_f: torch.Tensor,
     kappa_a: torch.Tensor,
+    sigma_kappa: torch.Tensor,
     radius: int,
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Same-bin support ahead of and behind each cell along the bin tangent.
+    """Support ahead of and behind each cell along bin k's tangent, read co-circularly across bins.
 
-    w(δ) = exp(-|δ|²/2σ_f²) · exp(κ_a(cos 2φ - 1)), φ = angle between δ and the tangent, so
-    reach (σ_f) and direction tuning (κ_a) are separate knobs. Each lobe is normalised by its own
-    weight sum: a cell inside a long contour sees f_fwd ≈ f_bwd ≈ the contour's ρ.
+    w(δ) = exp(-|δ|²/2σ_f²) · exp(κ_a(cos 2ψ - 1)), ψ = angle between δ and the tangent, so reach
+    (σ_f) and direction tuning (κ_a) are separate knobs. Each lobe is normalised by its own weight
+    sum: a cell inside a long contour sees f_fwd ≈ f_bwd ≈ the contour's ρ.
+
+    A neighbour at δ lies on the circle tangent to θ_k with curvature κ = 2 sin ψ / |δ|, and the
+    circle's tangent there is θ_k + 2ψ (Parent & Zucker). Bin k reads the neighbour's response at
+    θ_k + s·2ψ, linearly interpolated between the two nearest bins, with s = σ_κ² / (σ_κ² + κ²):
+    turns implied by curvatures within the tolerance σ_κ (per cell) are expected, sharper ones are
+    read as straight continuation. At σ_κ = 0 this is the same-bin collinear read. The K×K bank
+    of kernels is built from the parameters and applied as one fixed-radius conv.
     """
     nH, nW, K = rho_nr.shape
     dtype, dev = rho_nr.dtype, rho_nr.device
@@ -274,21 +274,46 @@ def bipole_facilitation_bins(
     cos2phi = (t * t - n * n) / d2.clamp_min(1.0)
     radial = torch.exp(-d2 / (2.0 * (sigma_f * sigma_f).clamp_min(eps)))
     w = radial * torch.exp(kappa_a * (cos2phi - 1.0))
-    fwd = (w * (t > 1e-6)).unsqueeze(1)
-    bwd = (w * (t < -1e-6)).unsqueeze(1)
-    f_fwd = _reflect_conv_hwk(rho_nr, fwd, groups=K) / (fwd.sum(dim=(-2, -1)).view(1, 1, K) + eps)
-    f_bwd = _reflect_conv_hwk(rho_nr, bwd, groups=K) / (bwd.sum(dim=(-2, -1)).view(1, 1, K) + eps)
+    on_fwd = t > 1e-6
+    on_bwd = t < -1e-6
+
+    # Turn of the tangent along the circle, 2ψ with ψ = atan(n/t) in (−π/2, π/2); it is the same
+    # for both lobes. t = 0 lies in neither lobe.
+    turn = 2.0 * torch.atan(n / torch.where(on_fwd | on_bwd, t, torch.ones_like(t)))
+    kappa_sq = 4.0 * n * n / (d2 * d2).clamp_min(1.0)
+    sk2 = sigma_kappa * sigma_kappa
+    shrink = sk2 / (sk2 + kappa_sq + eps)
+    # Read position in bin units. k is added as an integer so σ_κ = 0 reads exactly bin k.
+    k_idx = torch.arange(K, device=dev, dtype=dtype).view(K, 1, 1)
+    pos = k_idx + shrink * turn * (K / math.pi)
+    j0 = torch.floor(pos)
+    frac = (pos - j0).unsqueeze(-1)
+    j0 = torch.remainder(j0, K).unsqueeze(-1)
+    j1 = torch.remainder(j0 + 1.0, K)
+    jj = torch.arange(K, device=dev, dtype=dtype).view(1, 1, 1, K)
+    read = (1.0 - frac) * (jj == j0).to(dtype) + frac * (jj == j1).to(dtype)  # (K, ks, ks, K_in)
+
+    fwd = (w * on_fwd).unsqueeze(-1) * read
+    bwd = (w * on_bwd).unsqueeze(-1) * read
+    bank = torch.cat([fwd, bwd], dim=0).permute(0, 3, 1, 2)  # (2K, K_in, ks, ks)
+    both = _reflect_conv_hwk(rho_nr, bank)
+    # Each kernel's read weights sum to 1 over the input bins, so the lobe norms are unchanged.
+    f_fwd = both[..., :K] / ((w * on_fwd).sum(dim=(-2, -1)).view(1, 1, K) + eps)
+    f_bwd = both[..., K:] / ((w * on_bwd).sum(dim=(-2, -1)).view(1, 1, K) + eps)
     return f_fwd, f_bwd
 
 
-def surround_bins_B_weighted(
+def surround_bins_same(
     rho_nr: torch.Tensor,
-    B: torch.Tensor,
     *,
     sigma_s: torch.Tensor,
     radius: int,
     eps: float,
 ) -> torch.Tensor:
+    """Same-orientation pool: each bin's Gaussian-weighted mean over the neighbouring cells, the cell
+    itself excluded. The pool is tuned exactly like the bins (κ_vm), so a cell's own orientation never
+    reaches another channel's pool, and the readout codes a cell relative to its same-orientation context.
+    """
     nH, nW, K = rho_nr.shape
     dtype, dev = rho_nr.dtype, rho_nr.device
     sigma_sq = (sigma_s * sigma_s).clamp_min(eps)
@@ -296,8 +321,6 @@ def surround_bins_B_weighted(
     if radius <= 0:
         return torch.zeros_like(rho_nr)
     ks = 2 * radius + 1
-    B = B.to(dtype=dtype, device=dev)
-    col_sum = B.sum(dim=0)
 
     # The surround is a Gaussian over every offset but the centre. exp(-(dy² + dx²)/2σ²) factors
     # into a column pass and a row pass; the centre tap has weight 1 and is subtracted afterwards.
@@ -310,9 +333,7 @@ def surround_bins_B_weighted(
     x = Fn.conv2d(x, g.view(1, 1, ks, 1).expand(K, 1, ks, 1), groups=K)
     x = Fn.conv2d(x, g.view(1, 1, 1, ks).expand(K, 1, 1, ks), groups=K)
     smoothed = x.squeeze(0).permute(1, 2, 0) - rho_nr
-    numer = torch.matmul(smoothed, B)
-    denom = w_acc * col_sum.view(1, 1, K) + eps
-    return numer / denom
+    return smoothed / (w_acc + eps)
 
 
 def rho_ste_hard_max(rho_out: torch.Tensor, tau: float) -> torch.Tensor:
@@ -354,16 +375,15 @@ class ContourSeed(nn.Module):
         num_orient_bins: int = _K,
         facil_radius: int = _FACIL_RADIUS,
         facil_mode: str = str(getattr(SEED, "FACIL_MODE", "collinear")),
-        cross_surround_radius: int = _CROSS_SURROUND_RADIUS,
+        cross_surround_radius: int = _SURROUND_RADIUS,
         surround_sigma: float = float(getattr(SEED, "SURROUND_SIGMA", 2.0)),
         surround_mode: str = str(getattr(SEED, "SURROUND_MODE", "broadside")),
         rho_ste_tau: float = _RHO_STE_TAU,
         kappa_a_init: float = _KAPPA_A_INIT,
         beta_gap_init: float = _BETA_GAP_INIT,
-        beta_scale_init: float = _BETA_SCALE_INIT,
+        sigma_kappa_init: float = _SIGMA_KAPPA_INIT,
         *,
         surround_radius: int | None = None,
-        scales: tuple[int, ...] = (),
         **kw,
     ):
         super().__init__()
@@ -382,7 +402,6 @@ class ContourSeed(nn.Module):
         dev0 = torch.device("cpu")
         tb = orientation_bin_centers(self.K, dev0, torch.float32)
         self.register_buffer("theta_bins", tb, persistent=False)
-        self.register_buffer("B_orth", orientation_B_matrix(self.K, dev0, torch.float32), persistent=False)
 
         self._kappa_vm_raw = nn.Parameter(torch.tensor(_inv_softplus(kappa_vm_init)))
         self._eta_z_raw = nn.Parameter(torch.tensor(_inv_softplus(eta_z_init)))
@@ -399,13 +418,8 @@ class ContourSeed(nn.Module):
         self._kappa_a_raw = nn.Parameter(torch.tensor(_inv_softplus(kappa_a_init)))
         self._beta_gap_raw = nn.Parameter(torch.tensor(_inv_softplus(beta_gap_init)))
         self._sigma_s_raw = nn.Parameter(torch.tensor(_inv_softplus(sigma_s_init)))
-        self.scales = tuple(int(s) for s in scales)
-        if self.scales:
-            # Saved with the weights, so a checkpoint says which scales it was trained with.
-            self.register_buffer("scale_factors", torch.tensor(self.scales, dtype=torch.long))
-            self._beta_scale_raw = nn.Parameter(
-                torch.full((len(self.scales),), _inv_softplus(beta_scale_init))
-            )
+        # Curvature tolerance of the association field, in 1/cell; ≈ 0 starts collinear.
+        self._sigma_kappa_raw = nn.Parameter(torch.tensor(_inv_softplus(sigma_kappa_init)))
 
     @property
     def kappa_vm(self) -> torch.Tensor:
@@ -448,8 +462,8 @@ class ContourSeed(nn.Module):
         return Fn.softplus(self._beta_gap_raw).view(())
 
     @property
-    def beta_scale(self) -> torch.Tensor:
-        return Fn.softplus(self._beta_scale_raw)
+    def sigma_kappa(self) -> torch.Tensor:
+        return Fn.softplus(self._sigma_kappa_raw).view(())
 
     @property
     def sigma_s(self) -> torch.Tensor:
@@ -499,18 +513,18 @@ class ContourSeed(nn.Module):
             ay_bin = ay_bin.reshape(nH, nW, K)
 
         bar_theta = self.theta_bins.to(device=device, dtype=rho_bin.dtype)
-        B = self.B_orth.to(device=device, dtype=rho_bin.dtype)
 
         R = rho_bin * ok.unsqueeze(-1)
         Rsq = R * R
         eta_z_sq = self.eta_z * self.eta_z
         rho_nr = (Rsq / (Rsq + eta_z_sq + eps)) * ok.unsqueeze(-1)
 
-        f_fwd, f_bwd = bipole_facilitation_bins(
+        f_fwd, f_bwd = cocircular_bipole_bins(
             rho_nr,
             bar_theta,
             sigma_f=self.sigma_f,
             kappa_a=self.kappa_a,
+            sigma_kappa=self.sigma_kappa,
             radius=self.facil_radius,
             eps=eps,
         )
@@ -520,23 +534,11 @@ class ContourSeed(nn.Module):
         # exists on both sides, so it fills gaps without extending ends.
         bridge = 2.0 * f_fwd * f_bwd / (f_fwd + f_bwd + eps)
         gain = self.beta_seed + self.beta_coll * rho_coll
-        if self.scales:
-            # Cross-scale: the same bin's response at coarser scales, through the same NR. It is
-            # a gain too, so a coarse edge strengthens fine cells without widening the contour.
-            if "rho_bin_coarse" not in cells_flat:
-                raise ValueError(
-                    f"seed has scales={self.scales} but cells_flat has no 'rho_bin_coarse'"
-                )
-            Rc = cells_flat["rho_bin_coarse"].to(device).float().reshape(-1, nH, nW, K)
-            Rc_sq = Rc * Rc
-            rho_nr_coarse = (Rc_sq / (Rc_sq + eta_z_sq + eps)) * ok.unsqueeze(-1)
-            rho_scale = (self.beta_scale.view(-1, 1, 1, 1) * rho_nr_coarse).sum(dim=0)
-            gain = gain + rho_scale
         e = rho_nr * gain + self.beta_gap * bridge
 
-        S = surround_bins_B_weighted(
+        # Divisive pool from the same orientation channel's neighbours; facilitation stays in e.
+        S = surround_bins_same(
             rho_nr,
-            B,
             sigma_s=self.sigma_s,
             radius=self.cross_surround_radius,
             eps=eps,
@@ -563,8 +565,6 @@ class ContourSeed(nn.Module):
         cf_out["rho_nr_bins"] = rho_nr
         cf_out["rho_coll"] = (rho_coll * ok.unsqueeze(-1)).mean(dim=-1)
         cf_out["rho_coll_bins"] = rho_coll * ok.unsqueeze(-1)
-        if self.scales:
-            cf_out["rho_scale"] = rho_scale.mean(dim=-1)
         cf_out["fac"] = cf_out["rho_coll"]
         cf_out["exc"] = (e * ok.unsqueeze(-1)).mean(dim=-1)
         cf_out["sur"] = (S * ok.unsqueeze(-1)).mean(dim=-1)

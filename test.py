@@ -35,12 +35,10 @@ from hci.diagnostics_viz import viz_infer_rho, viz_infer_geometry
 from train import (
     HCIE2E,
     build_l0_pix_live,
-    coarse_rho_bins,
     default_device,
     proj_info_from_grid,
     report_checkpoint_compatibility,
     run_moments_cells_flat,
-    scales_from_state_dict,
     upgrade_model_state_dict,
 )
 
@@ -48,7 +46,7 @@ from train import (
 def build_model(ckpt, device):
     sd = upgrade_model_state_dict(ckpt["model_state"])
     sd = upgrade_renderer_state_dict(sd, prefix="renderer.")
-    m = HCIE2E(eps=SEED.EPS, scales=scales_from_state_dict(sd))
+    m = HCIE2E(eps=SEED.EPS)
     incompatible = m.load_state_dict(sd, strict=False)
     report_checkpoint_compatibility(incompatible, context="test build_model")
     return m.to(device).eval()
@@ -101,15 +99,12 @@ def run_image_inference(
     with torch.no_grad():
         ir_t = torch.from_numpy(ir_p).to(device)
         bm_t = ~compute_interior(Hp, Wp, device)
-        l0_dev = build_l0_pix_live(ir_t, bm_t, model.l0_metric, device, notch=notch)
+        l0_dev = build_l0_pix_live(
+            ir_t, bm_t, model.l0_metric, device, notch=notch, gain=model.l0_gain,
+        )
         cf_dev = run_moments_cells_flat(
             l0_dev, bm_t, H0, W0, device, kappa_vm=model.seed.kappa_vm,
         )
-        if model.seed.scales:
-            cf_dev["rho_bin_coarse"] = coarse_rho_bins(
-                ir_t, H0, W0, cf_dev["nH"], cf_dev["nW"], model.seed.scales,
-                model.l0_metric, device, notch=notch, kappa_vm=model.seed.kappa_vm,
-            )
         proj_dev = proj_info_from_grid(Hp, Wp, L1.PATCH_SIZE, L1.PATCH_OVERLAP)
 
         rho_out, branch, _, _, _, cf_out, _ = model.seed(cells_flat=cf_dev)

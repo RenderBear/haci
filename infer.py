@@ -36,7 +36,6 @@ from train import (
     HCIE2E,
     build_cells_flat,
     build_l0_pix,
-    coarse_rho_bins,
     default_device,
     format_l0_param_lines,
     format_l1_param_lines,
@@ -44,7 +43,6 @@ from train import (
     format_model_param_summary,
     format_renderer_param_lines,
     report_checkpoint_compatibility,
-    scales_from_state_dict,
     upgrade_model_state_dict,
     load_png_gt,
     load_bsds_gt,
@@ -71,7 +69,7 @@ def _resolve_gt_path(gt_dir: str, stem: str, gt_format: str | None) -> tuple[str
 def build_model(ckpt, device):
     sd = upgrade_model_state_dict(ckpt["model_state"])
     sd = upgrade_renderer_state_dict(sd, prefix="renderer.")
-    m = HCIE2E(eps=SEED.EPS, scales=scales_from_state_dict(sd))
+    m = HCIE2E(eps=SEED.EPS)
     incompatible = m.load_state_dict(sd, strict=False)
     report_checkpoint_compatibility(incompatible, context="infer build_model")
     return m.to(device).eval()
@@ -82,7 +80,7 @@ def _sync(device):
         torch.cuda.synchronize()
 
 
-def run_l0_l1(img_path, device, metric=None, notch=None, *, kappa_vm, scales=()):
+def run_l0_l1(img_path, device, metric=None, notch=None, gain=None, *, kappa_vm):
     timings = {}
 
     _sync(device)
@@ -101,6 +99,7 @@ def run_l0_l1(img_path, device, metric=None, notch=None, *, kappa_vm, scales=())
             offsets=L0.OFFSETS,
             metric=metric,
             notch=notch,
+            gain=gain,
         )
     h_np = h.cpu().numpy()
     img_pinwheel = np.clip(ir_p[:H0, :W0].copy(), 0.0, 1.0)
@@ -138,13 +137,6 @@ def run_l0_l1(img_path, device, metric=None, notch=None, *, kappa_vm, scales=())
     cells["is_border"] |= (cells["cy"] + cells["P"] / 2 > H0) | (
         cells["cx"] + cells["P"] / 2 > W0
     )
-    rho_coarse = None
-    if scales:
-        with torch.no_grad():
-            rho_coarse = coarse_rho_bins(
-                ir_t, H0, W0, cells["nH"], cells["nW"], scales,
-                metric, device, notch=notch, kappa_vm=kappa_vm,
-            )
     _sync(device)
     timings["l1"] = time.perf_counter() - t1
 
@@ -154,8 +146,6 @@ def run_l0_l1(img_path, device, metric=None, notch=None, *, kappa_vm, scales=())
     del z2_image, bm_np
 
     cells_flat = build_cells_flat(cells)
-    if rho_coarse is not None:
-        cells_flat["rho_bin_coarse"] = rho_coarse
 
     rho_total_grid = cells["rho_total"].astype(np.float64, copy=True)
     rho_peak_grid = cells["rho_peak"].astype(np.float64, copy=True)
@@ -430,8 +420,8 @@ def main():
         device,
         metric=model.l0_metric,
         notch=getattr(model, "l0_notch", None),
+        gain=getattr(model, "l0_gain", None),
         kappa_vm=model.seed.kappa_vm,
-        scales=model.seed.scales,
     )
 
     if args.verbose:
