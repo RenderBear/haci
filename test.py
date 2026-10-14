@@ -1,4 +1,4 @@
-r"""test.py — HCI test-set evaluation with the Berkeley boundary benchmark (ODS, OIS, AP)"""
+r"""test.py — HaCI test-set evaluation with the Berkeley boundary benchmark (ODS, OIS, AP)"""
 
 from __future__ import annotations
 
@@ -16,24 +16,24 @@ import torch
 from PIL import Image
 
 from params import L1, SEED, EVAL
-from hci.L0 import compute_interior
-from hci.L1 import pad_for_patch_grid
-from hci.renderer import (
+from haci.L0 import compute_interior
+from haci.L1 import pad_for_patch_grid
+from haci.renderer import (
     render_boundary_map_torch,
     ridge_nms,
     ridge_nms_torch,
     upgrade_renderer_state_dict,
 )
-from hci.boundary_bench import (
+from haci.boundary_bench import (
     collect,
     evaluate_image,
     exit_on_interrupt,
     score_image,
     write_bsr_files,
 )
-from hci.diagnostics_viz import viz_infer_rho, viz_infer_geometry
+from haci.diagnostics_viz import viz_infer_rho, viz_infer_geometry
 from train import (
-    HCIE2E,
+    HaCIE2E,
     build_l0_pix_live,
     default_device,
     proj_info_from_grid,
@@ -46,7 +46,7 @@ from train import (
 def build_model(ckpt, device):
     sd = upgrade_model_state_dict(ckpt["model_state"])
     sd = upgrade_renderer_state_dict(sd, prefix="renderer.")
-    m = HCIE2E(eps=SEED.EPS)
+    m = HaCIE2E(eps=SEED.EPS)
     incompatible = m.load_state_dict(sd, strict=False)
     report_checkpoint_compatibility(incompatible, context="test build_model")
     return m.to(device).eval()
@@ -149,7 +149,7 @@ def run_image_inference(
 
 
 def main():
-    ap = argparse.ArgumentParser(description="HCI test-set metrics (Berkeley boundary benchmark)")
+    ap = argparse.ArgumentParser(description="HaCI test-set metrics (Berkeley boundary benchmark)")
     ap.add_argument(
         "--dataset",
         default="BRIND",

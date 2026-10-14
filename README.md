@@ -1,4 +1,4 @@
-# Harmonic Contour Integration
+# HaCI: Harmonic Contour Integration
 
 A compact, fully distributed algorithm that extracts edges from RGB images through four stages:
 
@@ -14,7 +14,7 @@ A compact, fully distributed algorithm that extracts edges from RGB images throu
 4. **Render — ridge back-projection**  
    Cell `ρ` is splatted back to full resolution with learned 1D kernels aligned to local `θ`, producing a soft boundary map. Non-max suppression yields the final edge map.
 
-> **Paper:** [HCI: Harmonic Contour Integration for Edge Detection](https://zenodo.org/records/21382933) — DOI [10.5281/zenodo.21382933](https://doi.org/10.5281/zenodo.21382933). 
+> **Paper:** [HaCI: Harmonic Contour Integration for Edge Detection](https://zenodo.org/records/21382933) — DOI [10.5281/zenodo.21382933](https://doi.org/10.5281/zenodo.21382933). 
 
 ## Examples
 
@@ -23,7 +23,7 @@ A compact, fully distributed algorithm that extracts edges from RGB images throu
   <img src="assets/edges.png" alt="Detected edges" width="48%" />
 </p>
 
-<p align="center"><em>Left: input image. Right: HCI edge map from the bundled pretrained model.</em></p>
+<p align="center"><em>Left: input image. Right: HaCI edge map from the bundled pretrained model.</em></p>
 
 ## Benchmarks
 
@@ -47,15 +47,15 @@ Speed and memory, measured on MPS (Apple M4) with `baselines/speed.py`.
 ## Structure
 
 ```
-HCI/
+HaCI/
 ├── pyproject.toml
 ├── requirements.txt
 ├── params.py                # all hyperparameters
-├── train.py                 # HCIE2E training
+├── train.py                 # HaCIE2E training
 ├── test.py                  # ODS, OIS, AP evaluation
 ├── infer.py                 # single-image inference + diagnostics
 ├── scripts/                 # biped.sh, brind.sh, nyud.sh — fetch and lay out datasets
-├── hci/
+├── haci/
 │   ├── L0.py                # pixel-level contrast + gain control
 │   ├── L1.py                # cell-level z₂ moments (E, C, θ)
 │   ├── seed.py              # η_z NR + association field + same-orientation surround → cell ρ for splat
@@ -138,7 +138,7 @@ uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available
 
 Expect `True` for the second value on the CUDA path. `train`, `test` and `infer` pick `cuda` when available, then `mps` on Apple silicon, then `cpu` (the choice is printed as `device=...`); pass `--device cpu` to force CPU.
 
-On `mps`, the renderer's splat and its gradient run as Metal kernels (`hci/splat_metal.py`) and compute the same sums as the CPU path, so results agree up to float rounding.
+On `mps`, the renderer's splat and its gradient run as Metal kernels (`haci/splat_metal.py`) and compute the same sums as the CPU path, so results agree up to float rounding.
 
 ## Usage
 
@@ -334,7 +334,7 @@ Walks a single image directory, pairs each image with ground truth by matching f
 uv run test --model output/checkpoints/final.pt
 ```
 
-The protocol follows the Berkeley benchmark (`hci/boundary_bench.py`). At each of `--nthresh` thresholds, the saved 8-bit prediction is binarised and thinned (`bwmorph(·, 'thin', inf)`). It is then matched one-to-one against each annotator within `tol × image diagonal` pixels. ODS interpolates between thresholds, OIS uses each image's best threshold, and AP is the area under the PR curve resampled at 0.01 recall. Each annotator in a `.mat` file is matched separately; BSDS500 has about five per image. A PNG ground-truth map counts as a single annotator. Scores from earlier versions of `test.py`, which used a dilation match, are not comparable.
+The protocol follows the Berkeley benchmark (`haci/boundary_bench.py`). At each of `--nthresh` thresholds, the saved 8-bit prediction is binarised and thinned (`bwmorph(·, 'thin', inf)`). It is then matched one-to-one against each annotator within `tol × image diagonal` pixels. ODS interpolates between thresholds, OIS uses each image's best threshold, and AP is the area under the PR curve resampled at 0.01 recall. Each annotator in a `.mat` file is matched separately; BSDS500 has about five per image. A PNG ground-truth map counts as a single annotator. Scores from earlier versions of `test.py`, which used a dilation match, are not comparable.
 
 | Flag           | Default                       | Role                                                              |
 | -------------- | ----------------------------- | ----------------------------------------------------------------- |

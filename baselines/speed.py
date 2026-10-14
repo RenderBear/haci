@@ -1,14 +1,14 @@
-r"""speed.py — per-image time and peak working memory for Sobel, Canny and HCI.
+r"""speed.py — per-image time and peak working memory for Sobel, Canny and HaCI.
 
 Every (method, resolution, threads) cell runs in a fresh subprocess. Memory is the rise in peak RSS
 over one cold call, measured after imports, model load and image decode, so it counts the
-detector's working buffers (and, for HCI, PyTorch's first-call allocations) but not the runtime
+detector's working buffers (and, for HaCI, PyTorch's first-call allocations) but not the runtime
 itself. Time is the median of warm calls. Canny and Sobel time one run on the grayscale image (for
-Canny at its ODS threshold from compare.py); HCI times test.py's ``run_image_inference``, i.e.
+Canny at its ODS threshold from compare.py); HaCI times test.py's ``run_image_inference``, i.e.
 image to final NMS-thinned edge map, which includes decoding the input file.
 
-Canny and Sobel run on the CPU. HCI runs on ``--device``: CUDA if present, else MPS, else CPU, as
-in train.py, test.py and infer.py. Peak RSS only covers host memory, so on a GPU the HCI rows also
+Canny and Sobel run on the CPU. HaCI runs on ``--device``: CUDA if present, else MPS, else CPU, as
+in train.py, test.py and infer.py. Peak RSS only covers host memory, so on a GPU the HaCI rows also
 report the memory PyTorch holds on the device after the timed calls.
 
     uv run python baselines/speed.py
@@ -51,7 +51,7 @@ def worker(args) -> dict:
             im = im.resize(size if im.width >= im.height else size[::-1], Image.BICUBIC)
         rgbs.append(np.array(im))
 
-    if args.method == "hci":
+    if args.method == "haci":
         import torch
 
         torch.set_num_threads(args.threads or torch.get_num_threads())
@@ -96,7 +96,7 @@ def worker(args) -> dict:
             times.append(time.perf_counter() - t0)
     h, w = rgbs[0].shape[:2]
     extra = {}
-    if args.method == "hci":
+    if args.method == "haci":
         extra["device"] = device.type
         if device.type == "mps":
             extra["gpu_mb"] = torch.mps.driver_allocated_memory() / 2**20
@@ -117,14 +117,14 @@ def worker(args) -> dict:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Speed and memory of Sobel, Canny and HCI")
+    ap = argparse.ArgumentParser(description="Speed and memory of Sobel, Canny and HaCI")
     ap.add_argument("--images", default="data/test/imgs")
     ap.add_argument("--output", default="output/compare/profile.json")
     ap.add_argument("--canny_sigma", type=float, default=None)
     ap.add_argument("--canny_t", type=float, default=None, help="Default: ODS threshold from compare.py")
-    ap.add_argument("--methods", nargs="+", default=["sobel", "sobel_nms", "canny", "hci"])
+    ap.add_argument("--methods", nargs="+", default=["sobel", "sobel_nms", "canny", "haci"])
     ap.add_argument("--threads", type=int, nargs="+", default=[0, 1], help="0 = library default")
-    ap.add_argument("--device", default=None, help="HCI device: cpu, cuda or mps (default: CUDA, else MPS, else CPU)")
+    ap.add_argument("--device", default=None, help="HaCI device: cpu, cuda or mps (default: CUDA, else MPS, else CPU)")
     ap.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--method", help=argparse.SUPPRESS)
     ap.add_argument("--res", help=argparse.SUPPRESS)
@@ -150,9 +150,9 @@ def main():
     for method in args.methods:
         for res in RESOLUTIONS:
             for th in args.threads:
-                # HCI is ~10^3× slower, so it gets fewer calls; the fast methods repeat for stable medians.
-                n, rep = (20, 1) if method == "hci" else (20, 10)
-                if method == "hci" and res != "native":
+                # HaCI is ~10^3× slower, so it gets fewer calls; the fast methods repeat for stable medians.
+                n, rep = (20, 1) if method == "haci" else (20, 10)
+                if method == "haci" and res != "native":
                     n = 5 if res == "720p" else 2
                 env = dict(os.environ)
                 if th:

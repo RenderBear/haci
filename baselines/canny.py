@@ -14,7 +14,7 @@ import math
 import cv2
 import numpy as np
 
-from hci.boundary_bench import thresholds
+from haci.boundary_bench import thresholds
 
 SIGMA = 2.0
 LOW_RATIO = 0.4  # MATLAB's edge(·, 'canny') default

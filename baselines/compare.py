@@ -1,9 +1,9 @@
 r"""compare.py — score Canny and Sobel on a test split with the same benchmark as test.py, then
-print them next to HCI.
+print them next to HaCI.
 
 Image/GT pairing, GT loading, 8-bit quantisation and scoring are test.py's own, so the numbers are
-directly comparable with `uv run test`. Run HCI with test.py into ``<output_dir>/hci`` first (or
-point ``--hci_dir`` at an existing run) to get it in the table.
+directly comparable with `uv run test`. Run HaCI with test.py into ``<output_dir>/haci`` first (or
+point ``--haci_dir`` at an existing run) to get it in the table.
 
     uv run python baselines/compare.py
     uv run python baselines/compare.py --canny_sigmas 1 2 3
@@ -30,13 +30,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from params import EVAL  # noqa: E402
-from hci.boundary_bench import collect, evaluate_image, exit_on_interrupt, write_bsr_files  # noqa: E402
+from haci.boundary_bench import collect, evaluate_image, exit_on_interrupt, write_bsr_files  # noqa: E402
 from baselines import canny, sobel  # noqa: E402
 
 
 def _load_test_module():
     # Load test.py by path: `import test` can resolve to the standard library's test package.
-    spec = importlib.util.spec_from_file_location("hci_test", ROOT / "test.py")
+    spec = importlib.util.spec_from_file_location("haci_test", ROOT / "test.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -110,10 +110,10 @@ def run_method(name, fn, pairs, args, T, pool):
     return summary
 
 
-def print_table(output_dir, hci_dir):
+def print_table(output_dir, haci_dir):
     rows = []
-    for mode, label in (("s_eval", "HCI (s_eval, NMS)"), ("c_eval", "HCI (c_eval, raw)")):
-        p = os.path.join(hci_dir, mode, "results.json")
+    for mode, label in (("s_eval", "HaCI (s_eval, NMS)"), ("c_eval", "HaCI (c_eval, raw)")):
+        p = os.path.join(haci_dir, mode, "results.json")
         if os.path.exists(p):
             rows.append((label, json.load(open(p))))
     for p in sorted(Path(output_dir).glob("*/results.json")):
@@ -130,14 +130,14 @@ def print_table(output_dir, hci_dir):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Canny / Sobel baselines on the HCI benchmark")
+    ap = argparse.ArgumentParser(description="Canny / Sobel baselines on the HaCI benchmark")
     ap.add_argument("--dataset", default="BRIND")
     ap.add_argument("--images", default="data/test/imgs")
     ap.add_argument("--test_gt", default="data/test/gt")
     ap.add_argument("--gt_format", default=None)
     ap.add_argument("-n", type=int, default=None, help="Cap number of images")
     ap.add_argument("--output_dir", default="output/compare")
-    ap.add_argument("--hci_dir", default=None, help="test.py output dir (default: <output_dir>/hci)")
+    ap.add_argument("--haci_dir", default=None, help="test.py output dir (default: <output_dir>/haci)")
     ap.add_argument("--canny_sigmas", type=float, nargs="+", default=[canny.SIGMA])
     ap.add_argument("--methods", nargs="+", default=None, help="Subset of method names to run")
     ap.add_argument("--table_only", action="store_true", help="Only print the table from saved results")
@@ -145,7 +145,7 @@ def main():
     ap.add_argument("--nthresh", type=int, default=EVAL.THRESHOLD_COUNT)
     ap.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 1))
     args = ap.parse_args()
-    hci_dir = args.hci_dir or os.path.join(args.output_dir, "hci")
+    haci_dir = args.haci_dir or os.path.join(args.output_dir, "haci")
 
     if not args.table_only:
         T = _load_test_module()
@@ -173,7 +173,7 @@ def main():
             for name, fn in todo.items():
                 run_method(name, fn, pairs, args, T, pool)
 
-    print_table(args.output_dir, hci_dir)
+    print_table(args.output_dir, haci_dir)
 
 
 if __name__ == "__main__":

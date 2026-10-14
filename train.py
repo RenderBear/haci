@@ -1,4 +1,4 @@
-r"""train.py — HCI training pipeline: z₂ moments + association-field seed + harmonic render"""
+r"""train.py — HaCI training pipeline: z₂ moments + association-field seed + harmonic render"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from hci.L0 import (
+from haci.L0 import (
     load_image,
     compute_l0_rgb,
     compute_interior,
@@ -22,14 +22,14 @@ from hci.L0 import (
     L0LearnedMetric,
     L0Notch,
 )
-from hci.L1 import (
+from haci.L1 import (
     stride_from_patch_overlap,
     z_from_l0_harmonics,
     pad_for_patch_grid,
     compute_cell_moments,
 )
-from hci.seed import AndGateSeed
-from hci.renderer import (
+from haci.seed import AndGateSeed
+from haci.renderer import (
     ModulationRenderer,
     render_boundary_map_torch,
     proj_to_device,
@@ -228,7 +228,7 @@ def build_cells_flat(cells: dict) -> dict:
     return out
 
 
-class HCIE2E(nn.Module):
+class HaCIE2E(nn.Module):
     def __init__(
         self,
         eps: float = SEED.EPS,
@@ -267,7 +267,7 @@ class HCIE2E(nn.Module):
         return bmaps
 
 
-def prepare_batch(items, device, model: HCIE2E):
+def prepare_batch(items, device, model: HaCIE2E):
     meta = []
     for item in items:
         (gi, gt, Hp, Wp, Hg, Wg, H0, W0, border_mask, img) = item
@@ -476,7 +476,7 @@ def precompute_split(
     return stems
 
 
-class HCIDataset(Dataset):
+class HaCIDataset(Dataset):
     def __init__(self, cache_dir, stems):
         self.cache_dir = cache_dir
         self.stems = stems
@@ -651,7 +651,7 @@ def plot_training_curves(history, out_dir):
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 5), facecolor=VIZ.BG)
     fig.suptitle(
-        "HCI seed + learned ridge render",
+        "HaCI seed + learned ridge render",
         fontsize=12,
         color=VIZ.FG,
         fontfamily="monospace",
@@ -675,7 +675,7 @@ def plot_training_curves(history, out_dir):
     print(f"  saved {p}")
 
 
-def format_l0_param_lines(model: HCIE2E, *, indent: str = "  ") -> list[str]:
+def format_l0_param_lines(model: HaCIE2E, *, indent: str = "  ") -> list[str]:
     m = model.l0_metric
     w = m.W.detach().cpu()
 
@@ -703,7 +703,7 @@ def format_l0_param_lines(model: HCIE2E, *, indent: str = "  ") -> list[str]:
     return lines
 
 
-def format_l1_param_lines(model: HCIE2E, *, indent: str = "  ") -> list[str]:
+def format_l1_param_lines(model: HaCIE2E, *, indent: str = "  ") -> list[str]:
     K = int(getattr(L1, "NUM_ORIENT_BINS", 8))
     kvm = float(model.seed.kappa_vm.detach().cpu())
     return [f"{indent}K={K}  κ_vm={kvm:.4g}"]
@@ -721,7 +721,7 @@ def format_seed_param_lines(seed, *, indent: str = "  ") -> list[str]:
     return lines
 
 def format_renderer_param_lines(r, *, indent: str = "  ") -> list[str]:
-    from hci.renderer import ModulationRenderer
+    from haci.renderer import ModulationRenderer
 
     if not isinstance(r, ModulationRenderer):
         return [f"{indent}{type(r).__name__}"]
@@ -740,7 +740,7 @@ def format_renderer_param_lines(r, *, indent: str = "  ") -> list[str]:
     ]
 
 
-def format_model_param_counts(model: HCIE2E) -> tuple[int, int, int, int]:
+def format_model_param_counts(model: HaCIE2E) -> tuple[int, int, int, int]:
     n_l0 = sum(p.numel() for p in model.l0_metric.parameters())
     if model.l0_notch is not None:
         n_l0 += sum(p.numel() for p in model.l0_notch.parameters())
@@ -751,7 +751,7 @@ def format_model_param_counts(model: HCIE2E) -> tuple[int, int, int, int]:
     return n_total, n_l0, n_seed, n_renderer
 
 
-def format_model_param_summary(model: HCIE2E) -> str:
+def format_model_param_summary(model: HaCIE2E) -> str:
     n_tot, n_l0, n_seed, n_r = format_model_param_counts(model)
     return f"{n_tot} (L0={n_l0} seed={n_seed} renderer={n_r})"
 
@@ -878,7 +878,7 @@ def main():
         return
     print(f"  training on all {len(fit_stems)}")
 
-    model = HCIE2E(eps=SEED.EPS).to(device)
+    model = HaCIE2E(eps=SEED.EPS).to(device)
     if resume is not None:
         resume_sd = upgrade_model_state_dict(resume["model_state"])
         resume_sd = upgrade_renderer_state_dict(resume_sd, prefix="renderer.")
@@ -906,7 +906,7 @@ def main():
 
     print(f"\nmodel: {format_model_param_summary(model)}")
 
-    train_ds = HCIDataset(train_cache, fit_stems)
+    train_ds = HaCIDataset(train_cache, fit_stems)
     train_loader = DataLoader(
         train_ds,
         batch_size=args.batch_size,

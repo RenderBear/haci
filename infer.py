@@ -1,4 +1,4 @@
-r"""infer.py — HCI single-image inference"""
+r"""infer.py — HaCI single-image inference"""
 
 from __future__ import annotations
 
@@ -12,17 +12,17 @@ import torch
 from PIL import Image
 
 from params import L0, L1, SEED, EVAL, INFER
-from hci.L0 import compute_l0_rgb, compute_interior
-from hci.L1 import z_from_l0_harmonics, pad_for_patch_grid, compute_cell_moments
-from hci.seed import relative_energy
-from hci.renderer import (
+from haci.L0 import compute_l0_rgb, compute_interior
+from haci.L1 import z_from_l0_harmonics, pad_for_patch_grid, compute_cell_moments
+from haci.seed import relative_energy
+from haci.renderer import (
     compute_render_features,
     render_boundary_map_torch,
     proj_to_device,
     ridge_nms,
     upgrade_renderer_state_dict,
 )
-from hci.diagnostics_viz import (
+from haci.diagnostics_viz import (
     viz_infer_l0_pinwheel,
     viz_infer_l1_rho_masses,
     viz_infer_rho,
@@ -33,7 +33,7 @@ from hci.diagnostics_viz import (
     viz_infer_base_edges_overlay,
 )
 from train import (
-    HCIE2E,
+    HaCIE2E,
     build_cells_flat,
     build_l0_pix,
     default_device,
@@ -69,7 +69,7 @@ def _resolve_gt_path(gt_dir: str, stem: str, gt_format: str | None) -> tuple[str
 def build_model(ckpt, device):
     sd = upgrade_model_state_dict(ckpt["model_state"])
     sd = upgrade_renderer_state_dict(sd, prefix="renderer.")
-    m = HCIE2E(eps=SEED.EPS)
+    m = HaCIE2E(eps=SEED.EPS)
     incompatible = m.load_state_dict(sd, strict=False)
     report_checkpoint_compatibility(incompatible, context="infer build_model")
     return m.to(device).eval()
@@ -357,7 +357,7 @@ def _format_model_summary(model) -> list[str]:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="HCI single-image inference")
+    ap = argparse.ArgumentParser(description="HaCI single-image inference")
     ap.add_argument("-i", "--image", required=True, help="Path to the input image.")
     ap.add_argument("--output_dir", default="output/results")
     ap.add_argument("--model", default="pretrained/final.pt")

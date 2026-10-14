@@ -2,7 +2,7 @@ r"""Sobel baseline — 3×3 Sobel gradient magnitude of the grayscale image, no 
 
 ``soft_map`` divides the L2 magnitude by the response to a unit step (4 for a [0, 1] image), a fixed
 scale so one threshold means the same thing on every image. ``nms`` keeps only local maxima across
-the gradient direction (Canny's four-direction suppression), the counterpart of HCI's ``s_eval``.
+the gradient direction (Canny's four-direction suppression), the counterpart of HaCI's ``s_eval``.
 """
 
 from __future__ import annotations
