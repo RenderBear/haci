@@ -14,7 +14,7 @@ A compact, fully distributed algorithm that extracts edges from RGB images throu
 4. **Render — ridge back-projection**  
    Cell `ρ` is splatted back to full resolution with learned 1D kernels aligned to local `θ`, producing a soft boundary map. Non-max suppression yields the final edge map.
 
-> **Paper:** [HaCI: Harmonic Contour Integration for Edge Detection](https://zenodo.org/records/21382933) — DOI [10.5281/zenodo.21382933](https://doi.org/10.5281/zenodo.21382933). 
+> **Paper:** [HaCI: Harmonic Contour Integration for Edge Detection](https://zenodo.org/records/23375444), DOI [10.5281/zenodo.21382932](https://doi.org/10.5281/zenodo.21382932).
 
 ## Examples
 
