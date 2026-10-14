@@ -556,6 +556,7 @@ def upgrade_model_state_dict(state_dict: dict) -> dict:
         "seed._R0",
         "seed._a_raw",
         "seed._b_raw",
+        "l0_gain._w_scale_raw",
     }
     rename = {
         "seed._beta_raw": "seed._beta_seed_raw",
@@ -633,7 +634,6 @@ def debug_seed_batch(
         ("σ_κ", seed._sigma_kappa_raw),
         ("L0 λ", model.l0_gain._lambda_raw),
         ("L0 σ_r", model.l0_gain._pool_sigma_raw),
-        *((("L0 w_scale", model.l0_gain._w_scale_raw),) if model.l0_gain._w_scale_raw.numel() else ()),
     ):
         if t.grad is None:
             print(f"  |grad| {name}: grad=None")
@@ -696,11 +696,9 @@ def format_l0_param_lines(model: HCIE2E, *, indent: str = "  ") -> list[str]:
             f"σ_n={n.sigma_n.item():.3g}  d={n.d.item():.3g}  L={2 * n.H + 1}",
         ])
     g = model.l0_gain
-    ws = "  ".join(f"w[{f}]={float(v):.4g}" for f, v in zip(g.scales[1:], g.w_scale.tolist()))
     lines.extend([
         "",
-        f"{indent}gain: scales={g.scales}  λ={g.lam.item():.4g}  "
-        f"σ_r={g.pool_sigma.item():.4g}  {ws}",
+        f"{indent}gain: λ={g.lam.item():.4g}  σ_r={g.pool_sigma.item():.4g}",
     ])
     return lines
 
@@ -906,7 +904,7 @@ def main():
         optimizer, T_max=args.epochs, eta_min=args.lr * 0.1, last_epoch=start_epoch - 1
     )
 
-    print(f"\nmodel: {format_model_param_summary(model)}  L0 scales={model.l0_gain.scales}")
+    print(f"\nmodel: {format_model_param_summary(model)}")
 
     train_ds = HCIDataset(train_cache, fit_stems)
     train_loader = DataLoader(

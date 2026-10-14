@@ -14,7 +14,7 @@ A compact, fully distributed algorithm that extracts edges from RGB images throu
 4. **Render — ridge back-projection**  
    Cell `ρ` is splatted back to full resolution with learned 1D kernels aligned to local `θ`, producing a soft boundary map. Non-max suppression yields the final edge map.
 
-> **Paper:** [HCI: Harmonic Contour Integration for Edge Detection](https://zenodo.org/records/21382933) — DOI [10.5281/zenodo.21382933](https://doi.org/10.5281/zenodo.21382933). A copy is also bundled in this repository (`assets/hci.pdf`).
+> **Paper:** [HCI: Harmonic Contour Integration for Edge Detection](https://zenodo.org/records/21382933) — DOI [10.5281/zenodo.21382933](https://doi.org/10.5281/zenodo.21382933). 
 
 ## Examples
 
@@ -31,18 +31,18 @@ Scores for `pretrained/final.pt` on the BRIND test set (200 images; the model wa
 
 | Output | ODS | Precision | Recall | OIS | AP |
 | --- | --- | --- | --- | --- | --- |
-| NMS-thinned map (`s_eval`) | 0.7024 | 0.6664 | 0.7426 | 0.7274 | 0.7487 |
-| Raw soft map (`c_eval`) | 0.6995 | 0.6716 | 0.7299 | 0.7232 | 0.6609 |
+| NMS-thinned map (`s_eval`) | 0.7072 | 0.6745 | 0.7432 | 0.7318 | 0.7549 |
+| Raw soft map (`c_eval`) | 0.7043 | 0.6777 | 0.7331 | 0.7274 | 0.6524 |
 
-Precision and recall are taken at the ODS threshold (0.72 for both maps).
+Precision and recall are taken at the ODS threshold (0.74 for both maps).
 
 Speed and memory, measured on MPS (Apple M4) with `baselines/speed.py`. 
 
 | Resolution | Time | Host memory | GPU memory |
 | --- | --- | --- | --- |
-| 481×321 | 52 ms | 126 MB | 1.2 GB |
-| 1280×720 | 195 ms | 177 MB | 1.2 GB |
-| 1920×1080 | 433 ms | 240 MB | 2.2 GB |
+| 481×321 | 35 ms | 122 MB | 1.1 GB |
+| 1280×720 | 196 ms | 168 MB | 1.1 GB |
+| 1920×1080 | 444 ms | 229 MB | 2.2 GB |
 
 ## Structure
 

@@ -20,14 +20,10 @@ L0 = SimpleNamespace(
     NOTCH_OMEGA_N_INIT=1.0 / 8,
     NOTCH_SIGMA_N_INIT=1.0 / 32,
     NOTCH_D_INIT=0.8,
-    # Contrast gain control (L0GainControl): the drive at each offset scale s in SCALES (on the
-    # image blurred with σ = SCALE_BLUR·√(s²−1)) is divided by η² + its own energy + λ·G_r ∗
-    # (energy pooled over directions and scales); coarse scales sum in the harmonics, one weight
-    # each. λ and the weights start ≈ 0, i.e. the per-direction L0. G_r is truncated at
-    # POOL_RADIUS px. Trained with (1, 2, 4), the coarse weights stayed ≈ 0.02, so scale 1 only.
-    SCALES=(1,),
-    SCALE_BLUR=0.5,
-    SCALE_WEIGHT_INIT=1e-3,
+    # Contrast gain control (L0GainControl): each direction's drive is divided by η² + its own
+    # energy + λ·G_r ∗ (energy pooled over directions). λ starts ≈ 0, i.e. the per-direction L0.
+    # G_r is truncated at POOL_RADIUS px. Coarser offsets (2 and 4 px) were tried here and their
+    # learned weights stayed ≈ 0.02, so they were removed.
     POOL_LAMBDA_INIT=1e-5,
     POOL_SIGMA_INIT=2.0,
     POOL_RADIUS=16,

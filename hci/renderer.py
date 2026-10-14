@@ -614,7 +614,15 @@ def render_boundary_map_torch(
     rho_NK = rho_flat_bins.reshape(-1)
     keep = (gate_NK > _GATE_ACTIVE_THRESHOLD) & (rho_NK > _RHO_ACTIVE_FLOOR)
 
-    if not bool(keep.any().item()):
+    # MPS caches compiled work per tensor shape and never frees it. Selecting the active pairs
+    # gives a new pair count, and with it new shapes, at every training step as the weights move,
+    # so host memory grows by ~9 MB per image until the machine swaps. On MPS every (cell, bin)
+    # pair is deposited instead, with zero amplitude where inactive: the sums only gain exact
+    # zeros, and the shapes depend on the image size alone.
+    fixed_shape = device.type == "mps"
+    if fixed_shape:
+        rho_NK = rho_NK * keep.to(dtype=dtype)
+    elif not bool(keep.any().item()):
         h_perp = renderer.h_perp
         h_par  = renderer.h_par
         zero = (
@@ -632,7 +640,10 @@ def render_boundary_map_torch(
             return out, theta_star[:Hp, :Wp]
         return out
 
-    feats_active = feats_flat[keep]
+    def _active(t: torch.Tensor) -> torch.Tensor:
+        return t if fixed_shape else t[keep]
+
+    feats_active = _active(feats_flat)
     raw_active = renderer.correction(feats_active)
     kappa_active     = renderer.kappa_max   * torch.tanh(raw_active[:, 0])
     ext_s_active     = renderer.ext_max     * torch.tanh(raw_active[:, 1])
@@ -641,12 +652,12 @@ def render_boundary_map_torch(
     alpha_active = torch.exp(log_alpha_active)
 
     bin_idx_full = torch.arange(K, device=device).unsqueeze(0).expand(N, K).reshape(-1)
-    active_bin = bin_idx_full[keep]
+    active_bin = _active(bin_idx_full)
 
-    ax_active   = ax_bin.reshape(-1)[keep].detach()
-    ay_active   = ay_bin.reshape(-1)[keep].detach()
-    rho_active  = rho_NK[keep]
-    gate_active = gate_NK[keep]
+    ax_active   = _active(ax_bin.reshape(-1)).detach()
+    ay_active   = _active(ay_bin.reshape(-1)).detach()
+    rho_active  = _active(rho_NK)
+    gate_active = _active(gate_NK)
 
     cos_a = torch.cos(bar_theta).index_select(0, active_bin)
     sin_a = torch.sin(bar_theta).index_select(0, active_bin)
