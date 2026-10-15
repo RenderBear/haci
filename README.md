@@ -31,18 +31,18 @@ Scores for `pretrained/final.pt` on the BRIND test set (200 images; the model wa
 
 | Output | ODS | Precision | Recall | OIS | AP |
 | --- | --- | --- | --- | --- | --- |
-| NMS-thinned map (`s_eval`) | 0.7183 | 0.6834 | 0.7569 | 0.7407 | 0.7641 |
-| Raw soft map (`c_eval`) | 0.7161 | 0.6882 | 0.7464 | 0.7372 | 0.6694 |
+| NMS-thinned map (`s_eval`) | 0.7179 | 0.6791 | 0.7614 | 0.7402 | 0.7651 |
+| Raw soft map (`c_eval`) | 0.7158 | 0.6842 | 0.7505 | 0.7373 | 0.6723 |
 
-Precision and recall are taken at the ODS threshold (0.74 for both maps).
+Precision and recall are taken at the ODS threshold (0.71 for both maps).
 
 Speed and memory, measured on MPS (Apple M4) with `baselines/speed.py`. 
 
 | Resolution | Time | Host memory | GPU memory |
 | --- | --- | --- | --- |
-| 481×321 | 35 ms | 124 MB | 1.1 GB |
-| 1280×720 | 200 ms | 171 MB | 1.1 GB |
-| 1920×1080 | 453 ms | 232 MB | 2.2 GB |
+| 481×321 | 36 ms | 124 MB | 1.1 GB |
+| 1280×720 | 201 ms | 171 MB | 1.1 GB |
+| 1920×1080 | 459 ms | 233 MB | 2.2 GB |
 
 ## Structure
 

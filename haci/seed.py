@@ -155,8 +155,8 @@ def surround_bins_same(
     eps: float,
 ) -> torch.Tensor:
     """Same-orientation pool: each bin's Gaussian-weighted mean over the neighbouring cells, the cell
-    itself excluded. The pool is tuned exactly like the bins (κ_vm), so a cell's own orientation never
-    reaches another channel's pool, and the readout codes a cell relative to its same-orientation context.
+    itself excluded. Each bin's pool reads only that bin, so there are no cross-orientation terms: its
+    tuning is the bin tuning (κ_vm), and the readout codes a cell relative to its same-orientation context.
     """
     nH, nW, K = rho_nr.shape
     dtype, dev = rho_nr.dtype, rho_nr.device

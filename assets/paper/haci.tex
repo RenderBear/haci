@@ -49,7 +49,7 @@
 \maketitle
 
 \begin{abstract}
-This paper describes HaCI (Harmonic Contour Integration), a compact, fully distributed edge detection method. Through the encoding of classical early-visual priors like divisive normalisation, and association-field facilitation and suppression, the method exposes a network made up of a small set of $159$ learnable parameters. The method is composed of four staged operations on an image: the construction of a per-pixel contrast signal and its projection onto circular harmonics (L0), pooling of the harmonics over overlapping cells into von~Mises orientation bins (L1), refinement of the signal via facilitation and suppression (Seed) and the eventual projection of the pooled signal back onto the pixel level (renderer). The renderer back projection is then passed through non-max suppression to retrieve clean edges.
+This paper describes HaCI (Harmonic Contour Integration), a compact, fully distributed edge detection algorithm. Through the encoding of classical early-visual priors like divisive normalisation, and association-field facilitation and suppression, the algorithm exposes a network made up of a small set of $161$ learnable parameters. The algorithm is composed of four staged operations on an image: the construction of a per-pixel contrast signal and its projection onto circular harmonics (L0), pooling of the harmonics over overlapping cells into von~Mises orientation bins (L1), refinement of the signal via facilitation and suppression (Seed) and the eventual projection of the pooled signal back onto the pixel level (renderer). The renderer back projection is then passed through non-max suppression to retrieve clean edges.
 \end{abstract}
 
 \paragraph{Keywords.} Contour Integration, Harmonic Projection, Divisive Normalisation, Filtered Back-Projection, Edge Detection.
@@ -59,7 +59,7 @@ This paper describes HaCI (Harmonic Contour Integration), a compact, fully distr
 
 One of the primary functions of the early visual cortex is the transformation of retinal input into global contours. As the cortex operates in a highly parallelized fashion, low-level signals are normalized across the visual grid and passed through layers of increasing radius that accumulate evidence across scale. These low-level signals are subjected to cortical transformations such as non-linear saturation~\cite{naka1966srod}, oriented filtering~\cite{hubel1962orientation}, divisive normalization~\cite{heeger1992normalisation,cavanaugh2002surround}, lateral facilitation and inhibition~\cite{kapadia1995dynamics,field1993contour} and figure-ground polarity~\cite{zhou2000border}. At higher levels, contour readouts are sharpened by collinear and co-circular support and normalised against the surrounding activity before being deposited onto a coherent boundary map.
 
-Analogs to the cortical architecture for computer vision require transforming sparse, irregular mechanisms into dense, synchronous operations suitable for array programming models and parallel processing hardware. Deep convolutional and transformer edge detectors have become the dominant approach~\cite{xie2015hed,liu2017rcf,he2019bdcn,pu2022edter,soria2023dexined,ye2024diffusionedge}, recovering contour structure implicitly through millions of learned weights that carry structural priors from the training data alone. The method introduced in this paper revisits older pipelines built from explicit structural priors, like Canny~\cite{canny1986computational} and gPb~\cite{arbelaez2011gpb}, which construct a pixel-level signal and improve it through an interpretable sequence of stages, but hold gain, scale and anisotropy fixed at design time. We deviate from these gradient-based methods, opting for harmonic projection and encoding cortex-like mechanisms as the core heuristic of a compact, fully differentiable four-stage graph, that extracts thin edges from an RGB image while exposing only $159$ learnable scalars to data.
+Analogs to the cortical architecture for computer vision require transforming sparse, irregular mechanisms into dense, synchronous operations suitable for array programming models and parallel processing hardware. Deep convolutional and transformer edge detectors have become the dominant approach~\cite{xie2015hed,liu2017rcf,he2019bdcn,pu2022edter,soria2023dexined,ye2024diffusionedge}, recovering contour structure implicitly through millions of learned weights that carry structural priors from the training data alone. The method introduced in this paper revisits older pipelines built from explicit structural priors, like Canny~\cite{canny1986computational} and gPb~\cite{arbelaez2011gpb}, which construct a pixel-level signal and improve it through an interpretable sequence of stages, but hold gain, scale and anisotropy fixed at design time. We deviate from these gradient-based methods, opting for harmonic projection and encoding cortex-like mechanisms as the core heuristic of a compact, fully differentiable four-stage graph, that extracts thin edges from an RGB image while exposing only $161$ learnable scalars to data.
 
 % ─────────────────────────────────────────────────────────────────────
 \section{Method}\label{sec:method}
@@ -138,13 +138,13 @@ with learnable concentration $\kappa_{\mathrm{vm}} > 0$ ($\softplus$). The per-b
 \begin{equation}\label{eq:anchor-bin}
   a_x^{(k)}(c) = \frac{\sum_{p} \abs{z_2(p)}\, v_k(\theta_p)\, x_p\, \mathrm{ok}_p}{\sum_{p} \abs{z_2(p)}\, v_k(\theta_p)\, \mathrm{ok}_p + \varepsilon},
 \end{equation}
-and similarly $a_y^{(k)}(c)$, where $\mathrm{ok}_p \in \{0,1\}$ excludes border pixels. Cells whose border-pixel fraction exceeds $0.2$, or that extend past the unpadded image, are flagged as $\mathrm{ok}(c) = 0$: the seed sets their response to zero and the renderer deposits nothing from them. They still count as neighbours: the seed's facilitation and surround means (\cref{sec:seed}) are normalised by fixed kernel sums, so a flagged cell enters them with value zero.
+and similarly $a_y^{(k)}(c)$, where $\mathrm{ok}_p \in \{0,1\}$ excludes border pixels. Cells whose border-pixel fraction exceeds $0.2$, or that extend past the unpadded image, are flagged as $\mathrm{ok}(c) = 0$: the seed sets their response to zero and the renderer deposits nothing from them. They still count as neighbours: the seed's facilitation, surround and flank means (\cref{sec:seed}) are normalised by fixed kernel sums, so a flagged cell enters them with value zero.
 
 The output of L1 is the per-bin tensor $\rho^{(k)}(c) \in \R^{N \times K}$ together with the sub-pixel anchors $(a_x^{(k)}, a_y^{(k)})$ and the bin centres $\bar\theta_k$. L1 has no learned parameters of its own; $\kappa_{\mathrm{vm}}$ is stored with the seed's parameters, and L1 is recomputed at every training step from the live L0 output, so gradients reach $\kappa_{\mathrm{vm}}$ through the bin weights $v_k$.
 
 \subsection{Seed: Gain Control}\label{sec:seed}
 
-The seed refines the L1 signal, converting the per-bin energies $\rho^{(k)}$ into a per-bin readout $\rho_{\mathrm{out}}^{(k)}(c) \in [0, 1]$, from which a per-cell scalar $\rho(c)$ and an orientation $\theta(c)$ are read. Each bin is facilitated by a co-circular association field along its tangent and divisively normalised against the same orientation in the surrounding cells.
+The seed refines the L1 signal, converting the per-bin energies $\rho^{(k)}$ into a per-bin readout $\rho_{\mathrm{out}}^{(k)}(c) \in [0, 1]$, from which a per-cell scalar $\rho(c)$ and an orientation $\theta(c)$ are read. Each bin is facilitated by a co-circular association field along its tangent and divisively normalised against the same orientation in the surrounding cells and in the cells that flank it along its normal.
 
 The per-cell state the seed produces (a boundary strength $\rho(c)$, an orientation $\theta(c)$, and a sub-pixel anchor) is designed to be task-agnostic: a mid-level contour representation that downstream stages could consume directly for segmentation, grouping, or shape analysis. We use the term \emph{seed} in this sense, as the distilled contour signal from which further processing proceeds. For the edge-detection task treated here that further processing is a single stage: the renderer (\cref{sec:render}) back-projects the seed onto the pixel grid. The seed's architecture does not depend on this choice of readout, but its parameters do: they are trained only through the renderer and the edge loss, and the per-cell exports are not on that path (see the cell-level export below), so their use as a general representation is untested here.
 
@@ -182,13 +182,13 @@ Support is collected separately ahead of and behind the cell, each lobe normalis
   f_{\pm}^{(k)}(c) = \frac{\sum_{\delta \in \mathcal{N}_f,\ \pm t_k(\delta) > 0} w_k(\delta)\, \tilde\rho^{(k)}_{\delta}(c)}
                           {\sum_{\delta \in \mathcal{N}_f,\ \pm t_k(\delta) > 0} w_k(\delta) + \varepsilon},
 \end{equation}
-so a cell inside a long contour sees $f_+ \approx f_- \approx$ the contour's response; offsets with $t_k(\delta) = 0$ belong to neither lobe. The lobes give the mean collinear support and a gap bridge, their harmonic mean:
-\begin{equation}\label{eq:rho-coll}
-  \rho_{\mathrm{coll}}^{(k)}(c) = \tfrac{1}{2}\bigl(f_+^{(k)}(c) + f_-^{(k)}(c)\bigr),
+so a cell inside a long contour sees $f_+ \approx f_- \approx$ the contour's response; offsets with $t_k(\delta) = 0$ belong to neither lobe. The lobes give the mean association support and a gap bridge, their harmonic mean:
+\begin{equation}\label{eq:rho-assoc}
+  \rho_{\mathrm{assoc}}^{(k)}(c) = \tfrac{1}{2}\bigl(f_+^{(k)}(c) + f_-^{(k)}(c)\bigr),
   \qquad
   b^{(k)}(c) = \frac{2\, f_+^{(k)}(c)\, f_-^{(k)}(c)}{f_+^{(k)}(c) + f_-^{(k)}(c) + \varepsilon}.
 \end{equation}
-The interpolation weights sum to one over the input bins, so the field is a bank of $2K \times K$ kernels of size $(2r_f + 1)^2$, built from $(\sigma_f, \kappa_a, \sigma_\kappa)$ and applied as a single convolution with reflect padding.
+The interpolation weights sum to one over the input bins, so each lobe in \cref{eq:lobes} stays a weighted mean of the neighbours' responses and its normaliser needs only the spatial weights $w_k$. The field is a bank of $2K \times K$ kernels of size $(2r_f + 1)^2$, built from $(\sigma_f, \kappa_a, \sigma_\kappa)$ and applied as a single convolution with reflect padding.
 
 \paragraph{Same-orientation Surround:}
 Each bin is pooled over the neighbouring cells of the same bin with a Gaussian of width $\sigma_S$ over the square neighbourhood $\mathcal{N}_S$ of radius $r_S$, the cell itself excluded:
@@ -198,20 +198,41 @@ Each bin is pooled over the neighbouring cells of the same bin with a Gaussian o
   \qquad
   G_{\sigma_S}(\delta) = \exp\!\left(-\frac{\norm{\delta}^2}{2\sigma_S^2}\right).
 \end{equation}
-The pool is tuned exactly like the bins (through $\kappa_{\mathrm{vm}}$), so a cell's own orientation never reaches another channel's pool, and the readout codes each cell relative to its same-orientation context. Only the cell is excluded, not its pixels: the $24$ nearest cells overlap it (\cref{sec:l1}), so $S$ also reads part of the cell's own L1 input and acts as a near-field same-orientation pool rather than a surround outside the cell's footprint. The near offsets of the association field overlap the cell in the same way; \cref{sec:results} gives the weight shares in the released model. $G_{\sigma_S}$ is separable: it is applied as a depthwise row and column convolution (reflect padding) and the centre tap is subtracted.
+Each bin's pool reads only that bin, so the pool has no cross-orientation terms: its orientation tuning is the bin tuning set by $\kappa_{\mathrm{vm}}$, and the readout codes each cell relative to its same-orientation context. Only the cell is excluded, not its pixels: the $24$ nearest cells overlap it (\cref{sec:l1}), so $S$ also reads part of the cell's own L1 input and acts as a near-field same-orientation pool rather than a surround outside the cell's footprint. The near offsets of the association field overlap the cell in the same way; \cref{sec:results} gives the weight shares in the released model. $G_{\sigma_S}$ is separable: it is applied as a depthwise row and column convolution (reflect padding) and the centre tap is subtracted.
+
+\paragraph{Flank Suppression:}
+$S$ is isotropic, so it cannot tell a contour with parallel neighbours on both sides, as in texture and gratings, from one that runs alone. A second same-bin pool reads the cells on either side of $c$ along the bin normal. Over the square neighbourhood $\mathcal{N}_{\mathrm{fl}}$ of radius $r_{\mathrm{fl}}$, an offset $\delta$ is weighted by
+\begin{equation}\label{eq:flank-w}
+  u_k(\delta) = \exp\!\left(-\frac{\norm{\delta}^2}{2\sigma_{\mathrm{fl}}^2}\right)
+                \exp\!\bigl(\kappa_{\mathrm{fl}} \bigl(\cos 2\psi^{\perp}_k(\delta) - 1\bigr)\bigr),
+  \qquad
+  \cos 2\psi^{\perp}_k(\delta) = \frac{n_k(\delta)^2 - t_k(\delta)^2}{\norm{\delta}^2},
+\end{equation}
+where $\psi^{\perp}_k(\delta)$ is the angle between $\delta$ and the normal $\hat n_k$, with $t_k, n_k$ as in \cref{eq:pos-t}. Offsets within Chebyshev distance $r_{\mathrm{ex}} = \lceil P/D \rceil - 1 = 2$ are left out. These are the $24$ cells that share pixels with $c$ (\cref{sec:l1}); a lone edge spreads into them, so without the exclusion it would flank itself. The two sides are normalised separately, like the association lobes:
+\begin{equation}\label{eq:flank-sides}
+  U_{\pm}^{(k)}(c) = \frac{\sum_{\delta \in \mathcal{N}_{\mathrm{fl}}^{\pm}} u_k(\delta)\, \rho_{\mathrm{NR}}^{(k)}(c + \delta)}
+                          {\sum_{\delta \in \mathcal{N}_{\mathrm{fl}}^{\pm}} u_k(\delta) + \varepsilon},
+  \qquad
+  \mathcal{N}_{\mathrm{fl}}^{\pm} = \bigl\{\delta \in \mathcal{N}_{\mathrm{fl}} : \norm{\delta}_\infty > r_{\mathrm{ex}},\ \pm n_k(\delta) > 0\bigr\}.
+\end{equation}
+They are combined by their harmonic mean,
+\begin{equation}\label{eq:flank}
+  U^{(k)}(c) = \frac{2\, U_+^{(k)}(c)\, U_-^{(k)}(c)}{U_+^{(k)}(c) + U_-^{(k)}(c) + \varepsilon},
+\end{equation}
+which, like the gap bridge of \cref{eq:rho-assoc}, is non-zero only when both sides are occupied. Gratings and texture, with parallel structure on both sides, are suppressed; a lone edge, or an edge beside a single parallel one, is not. Each bin reads only its own channel, so the flank pool is a bank of $2K$ kernels of size $(2r_{\mathrm{fl}} + 1)^2$, built from $\sigma_{\mathrm{fl}}$ and applied as a grouped convolution with reflect padding. The normal tuning $\kappa_{\mathrm{fl}}$ is fixed.
 
 \paragraph{Divisive Readout:}
-Collinear support scales the cell's own response, and the bridge adds a term that is non-zero only where there is support on both sides:
+Association support scales the cell's own response, and the bridge adds a term that is non-zero only where there is support on both sides:
 \begin{equation}\label{eq:e}
-  e^{(k)}(c) = \rho_{\mathrm{NR}}^{(k)}(c)\,\bigl(\beta_{\mathrm{seed}} + \beta_{\mathrm{coll}}\, \rho_{\mathrm{coll}}^{(k)}(c)\bigr) + \beta_{\mathrm{gap}}\, b^{(k)}(c).
+  e^{(k)}(c) = \rho_{\mathrm{NR}}^{(k)}(c)\,\bigl(\beta_{\mathrm{seed}} + \beta_{\mathrm{assoc}}\, \rho_{\mathrm{assoc}}^{(k)}(c)\bigr) + \beta_{\mathrm{gap}}\, b^{(k)}(c).
 \end{equation}
-Because the facilitation is multiplicative it cannot create a response past a line end, and the bridge fills gaps without extending ends. The excitation is divisively normalised against the surround through a Michaelis--Menten-style readout~\cite{naka1966srod,heeger1992normalisation}:
+Because the facilitation is multiplicative it cannot create a response past a line end, and the bridge fills gaps without extending ends. The excitation is divisively normalised against the surround and the flanks through a Michaelis--Menten-style readout~\cite{naka1966srod,heeger1992normalisation}:
 \begin{equation}\label{eq:rho-out-bin}
   \boxed{\;
   \rho_{\mathrm{out}}^{(k)}(c) = \frac{\bigl(e^{(k)}(c)\bigr)^2}
-                                       {\bigl(e^{(k)}(c)\bigr)^2 + \eta_r^2 + \lambda\, \bigl(S^{(k)}(c)\bigr)^2 + \varepsilon},\;}
+                                       {\bigl(e^{(k)}(c)\bigr)^2 + \eta_r^2 + \lambda\, \bigl(S^{(k)}(c)\bigr)^2 + \lambda_{\mathrm{fl}}\, \bigl(U^{(k)}(c)\bigr)^2 + \varepsilon},\;}
 \end{equation}
-with learnable gains $(\beta_{\mathrm{seed}}, \beta_{\mathrm{coll}}, \beta_{\mathrm{gap}})$, readout half-saturation $\eta_r$ and surround weight $\lambda$, all positive via $\softplus$. The squared $e$ on numerator and denominator gives a Naka--Rushton-shaped transfer with bounded range, while $\lambda S^2$ raises the half-saturation point where the neighbouring cells carry the same orientation.
+with learnable gains $(\beta_{\mathrm{seed}}, \beta_{\mathrm{assoc}}, \beta_{\mathrm{gap}})$, readout half-saturation $\eta_r$, surround weight $\lambda$ and flank weight $\lambda_{\mathrm{fl}}$, all positive via $\softplus$. The squared $e$ on numerator and denominator gives a Naka--Rushton-shaped transfer with bounded range. $\lambda S^2$ raises the half-saturation point where the neighbouring cells carry the same orientation, and $\lambda_{\mathrm{fl}} U^2$ raises it further where parallel contours occupy both flanks.
 
 \paragraph{Cell-level Export:}
 Three quantities are exported per cell. The scalar boundary strength $\rho(c) \in [0, 1]$ is the maximum over bins, returned through a straight-through estimator so the forward pass is hard while the backward pass is smooth:
@@ -323,7 +344,7 @@ The loss is HED-style class-balanced binary cross-entropy~\cite{xie2015hed}. Let
   \mathcal{L} = -\frac{1}{\abs{\Omega_0}}\sum_{p \in \Omega_0}\Bigl[\frac{n_-}{\abs{\Omega_0}}\, y(p)\log\hat B(p) + \frac{n_+}{\abs{\Omega_0}}\,(1 - y(p))\log(1 - \hat B(p))\Bigr],
 \end{equation}
 computed per image and averaged over the batch.
-Gradients flow through all four stages: through the renderer's MLP, correction bounds, gate temperature and 1D kernels; through the seed's eleven scalars; through the L1 von~Mises weights via $\kappa_{\mathrm{vm}}$; and through the L0 metric $(w_\ell, s_1, s_2, \theta_{\mathrm{chr}})$, notch $(\omega_n, \sigma_n, d)$ and gain control $(\lambda_0, \sigma_r)$. Because every L0 parameter is learned, L0 and L1 are recomputed at every step; the training cache holds only the padded RGB image, the ground truth and the border mask.
+Gradients flow through all four stages: through the renderer's MLP, correction bounds, gate temperature and 1D kernels; through the seed's thirteen scalars; through the L1 von~Mises weights via $\kappa_{\mathrm{vm}}$; and through the L0 metric $(w_\ell, s_1, s_2, \theta_{\mathrm{chr}})$, notch $(\omega_n, \sigma_n, d)$ and gain control $(\lambda_0, \sigma_r)$. Because every L0 parameter is learned, L0 and L1 are recomputed at every step; the training cache holds only the padded RGB image, the ground truth and the border mask.
 
 We train on the 300-image BRIND train split~\cite{pu2021rindnet}\footnote{\url{https://github.com/xavysp/BRIND}}, the BSDS500 images~\cite{arbelaez2011gpb} re-annotated for reflectance, illumination, normal and depth discontinuities and merged into one edge map per image. We use Adam~\cite{kingma2014adam} with a learning rate of $5\times 10^{-2}$ annealed on a cosine schedule to $5\times 10^{-3}$, gradient clipping at $\norm{\nabla}_2 \leq 1$, batch size $4$, for $50$ epochs.
 
@@ -334,20 +355,20 @@ We train on the 300-image BRIND train split~\cite{pu2021rindnet}\footnote{\url{h
 
 \begin{table}[h]
 \centering
-\caption{BRIND test set (200 images), trained on the 300-image BRIND train split. Precision and recall are taken at the ODS threshold ($0.74$ for both maps).}
+\caption{BRIND test set (200 images), trained on the 300-image BRIND train split. Precision and recall are taken at the ODS threshold ($0.71$ for both maps).}
 \label{tab:brind}
 \renewcommand{\arraystretch}{1.15}
 \begin{tabular}{lccccc}
 \toprule
 Output & ODS & Precision & Recall & OIS & AP \\
 \midrule
-Ridge-NMS map & $0.7072$ & $0.6745$ & $0.7432$ & $0.7318$ & $0.7549$ \\
-Soft map $\hat B$ & $0.7043$ & $0.6777$ & $0.7331$ & $0.7274$ & $0.6524$ \\
+Ridge-NMS map & $0.7179$ & $0.6791$ & $0.7614$ & $0.7402$ & $0.7651$ \\
+Soft map $\hat B$ & $0.7158$ & $0.6842$ & $0.7505$ & $0.7373$ & $0.6723$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Three learned properties change how the corresponding stages should be read. The notch moved away from its JPEG initialisation to $\omega_n = 0.41$, $\sigma_n = 0.18$, $d = 0.83$; at the five sampled frequencies $0, 1/9, \dots, 4/9$ cycles/px its gain is $0.94, 0.79, 0.52, 0.25, 0.19$, so it acts as a broad high-frequency cut rather than a notch. The curvature tolerance fell to $\sigma_\kappa = 0.002$, which shifts the co-circular read of \cref{eq:cocirc-read} by at most $0.01$ of a bin: in the released model the association field is effectively collinear. Finally, the learned widths $\sigma_S = 1.80$ and $\sigma_f = 1.86$ cells keep both seed pools close to the cell: $69\%$ of the surround weight, and $65$--$73\%$ of each facilitation lobe's weight depending on the bin, falls on the $24$ cells that share pixels with it.
+Four learned properties change how the corresponding stages should be read. The notch moved away from its JPEG initialisation to $\omega_n = 0.41$, $\sigma_n = 0.20$, $d = 0.68$; at the five sampled frequencies $0, 1/9, \dots, 4/9$ cycles/px its gain is $0.91, 0.77, 0.56, 0.37, 0.33$, so it acts as a broad high-frequency cut rather than a notch. The curvature tolerance fell to $\sigma_\kappa = 0.007$, which shifts the co-circular read of \cref{eq:cocirc-read} by at most $0.04$ of a bin: in the released model the association field is effectively collinear. The surround and the association field settled at different reaches. With $\sigma_S = 1.69$ cells, $74\%$ of the surround weight falls on the $24$ cells that share pixels with the cell, so $S$ stays a near-field pool. The association reach grew to $\sigma_f = 3.33$ cells, which leaves only $31$--$41\%$ of each facilitation lobe's weight, depending on the bin, on those cells. Finally, the flank weight grew from its near-zero initialisation ($0.01$) to $\lambda_{\mathrm{fl}} = 5.20$. With $\sigma_{\mathrm{fl}} = 1.48$ cells, $79$--$83\%$ of each flank's weight falls on the ring at Chebyshev distance $3$, the nearest cells that share no pixels with the centre cell.
 
 % ─────────────────────────────────────────────────────────────────────
 \section{Qualitative Example}\label{sec:qualitative}
@@ -378,7 +399,7 @@ HaCI applied to a single natural image is shown in \cref{fig:example}. The input
 % ─────────────────────────────────────────────────────────────────────
 \section{Parameter Inventory}\label{sec:params}
 
-The pipeline has $159$ learnable parameters (\cref{tab:learned-params}) and a handful of fixed structural constants (\cref{tab:fixed-params}). The renderer's correction MLP accounts for $124$ of the learned parameters; everything else is interpretable scalars (gains, half-saturation constants, anisotropy widths) or small monotone-parameterised filter taps.
+The pipeline has $161$ learnable parameters (\cref{tab:learned-params}) and a handful of fixed structural constants (\cref{tab:fixed-params}). The renderer's correction MLP accounts for $124$ of the learned parameters; everything else is interpretable scalars (gains, half-saturation constants, anisotropy widths) or small monotone-parameterised filter taps.
 
 \begin{table}[h]
 \centering
@@ -399,6 +420,9 @@ L1 border-cell fraction & --- & $0.2$ \\
 L1/Seed orientation bins & $K$ & $8$ \\
 Seed association-field radius & $r_f$ & $5$ cells \\
 Seed surround radius & $r_S$ & $10$ cells \\
+Seed flank radius & $r_{\mathrm{fl}}$ & $5$ cells \\
+Seed flank normal tuning & $\kappa_{\mathrm{fl}}$ & $2.0$ \\
+Seed flank exclusion (Chebyshev) & $r_{\mathrm{ex}}$ & $\lceil P/D \rceil - 1 = 2$ cells \\
 Seed STE temperature & $\tau$ & $0.1$ \\
 Renderer deposit half-width & $H_w$ & $\lceil 2 D \rceil = 4$\,px \\
 Inference edge threshold & $t_{\mathrm{edge}}$ & $0.5$ \\
@@ -406,9 +430,9 @@ Inference edge threshold & $t_{\mathrm{edge}}$ & $0.5$ \\
 \end{tabular}
 \end{table}
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering
-\caption{Learned parameters. Positive scalars are reparameterised through $\softplus$ unless noted: $\omega_n$ and $d$ use a sigmoid, $\sigma_f = 1 + \softplus(\cdot)$, and $\sigma_S$ is clamped below at $0.3$. Angles are unbounded.}
+\caption{Learned parameters. Positive scalars are reparameterised through $\softplus$ unless noted: $\omega_n$ and $d$ use a sigmoid, $\sigma_f$ and $\sigma_{\mathrm{fl}}$ are $1 + \softplus(\cdot)$, and $\sigma_S$ is clamped below at $0.3$. Angles are unbounded.}
 \label{tab:learned-params}
 \renewcommand{\arraystretch}{1.15}
 \setlength{\tabcolsep}{3.5pt}
@@ -426,7 +450,7 @@ L0 gain-control pool & $\lambda_0, \sigma_r$ & $10^{-5}, 2.0$ & 2 \\
 Seed von~Mises concentration & $\kappa_{\mathrm{vm}}$ & $2.0$ & 1 \\
 Seed NR half-saturation & $\eta_z$ & $10.0$ & 1 \\
 Seed channel gain & $\beta_{\mathrm{seed}}$ & $0.5$ & 1 \\
-Seed collinear gain & $\beta_{\mathrm{coll}}$ & $0.5$ & 1 \\
+Seed association gain & $\beta_{\mathrm{assoc}}$ & $0.5$ & 1 \\
 Seed gap-bridge gain & $\beta_{\mathrm{gap}}$ & $0.5$ & 1 \\
 Seed readout half-saturation & $\eta_r$ & $0.3$ & 1 \\
 Seed surround weight & $\lambda$ & $0.5$ & 1 \\
@@ -434,8 +458,10 @@ Seed association reach & $\sigma_f$ ($\geq 1$) & $2.0$ & 1 \\
 Seed association direction tuning & $\kappa_a$ & $8.0$ & 1 \\
 Seed curvature tolerance & $\sigma_\kappa$ & $0.01$ & 1 \\
 Seed surround width & $\sigma_S$ ($\geq 0.3$) & $1.0$ & 1 \\
+Seed flank weight & $\lambda_{\mathrm{fl}}$ & $0.01$ & 1 \\
+Seed flank reach & $\sigma_{\mathrm{fl}}$ ($\geq 1$) & $2.0$ & 1 \\
 \midrule
-\multicolumn{3}{l}{\textbf{Seed subtotal}} & $\bm{11}$ \\
+\multicolumn{3}{l}{\textbf{Seed subtotal}} & $\bm{13}$ \\
 \midrule
 Renderer correction MLP $5\to 12\to 4$ & $\Phi$ & near-zero output & 124 \\
 Renderer correction bounds & $\kappa_{\max}, \xi_{\max}, \delta_{n,\max}, \alpha_{\mathrm{range}}$ & $0.1, 1, 1, 0.5$ & 4 \\
@@ -445,7 +471,7 @@ Renderer longitudinal filter & $\{\zeta_j\}_{j=1}^{H_w}, h_0$ & Gaussian $\sigma
 \midrule
 \multicolumn{3}{l}{\textbf{Renderer subtotal}} & $\bm{139}$ \\
 \midrule
-\multicolumn{3}{l}{\textbf{Total}} & $\bm{159}$ \\
+\multicolumn{3}{l}{\textbf{Total}} & $\bm{161}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -453,7 +479,7 @@ Renderer longitudinal filter & $\{\zeta_j\}_{j=1}^{H_w}, h_0$ & Gaussian $\sigma
 % ─────────────────────────────────────────────────────────────────────
 \section{Discussion}\label{sec:discussion}
 
-HaCI compresses a classical contour-integration computation into a fully differentiable graph of $159$ scalars. The choice of what to expose to data and what to fix is rooted in the strict interpretation of cortical mechanisms. The renderer's $5 \to 12 \to 4$ correction head is the only learned component that is neither a named scalar nor a constrained filter; it is there to handle off-anchor edges, sub-pixel curvature and bin selectivity at junctions. With its output held at zero ($\kappa = \xi = \delta_n = 0$, $\alpha = 1$) the renderer reduces to a straight-stroke depositor; how much the head adds over that is left to the ablations below. The kernels $h_{\perp}, h_{\parallel}$ are parameterised so that every point in parameter space is a valid windowed-ramp radial filter and a positive monotone-decay longitudinal profile, respectively. This keeps the synthesis path interpretable as a ramp-filtered stroke deposit, while leaving the kernel shape open to gradient descent against the boundary objective.
+HaCI compresses a classical contour-integration computation into a fully differentiable graph of $161$ scalars. The choice of what to expose to data and what to fix is rooted in the strict interpretation of cortical mechanisms. The renderer's $5 \to 12 \to 4$ correction head is the only learned component that is neither a named scalar nor a constrained filter; it is there to handle off-anchor edges, sub-pixel curvature and bin selectivity at junctions. With its output held at zero ($\kappa = \xi = \delta_n = 0$, $\alpha = 1$) the renderer reduces to a straight-stroke depositor; how much the head adds over that is not measured in this report. The kernels $h_{\perp}, h_{\parallel}$ are parameterised so that every point in parameter space is a valid windowed-ramp radial filter and a positive monotone-decay longitudinal profile, respectively. This keeps the synthesis path interpretable as a ramp-filtered stroke deposit, while leaving the kernel shape open to gradient descent against the boundary objective.
 
 This report fixes the equations and reports results on BRIND (\cref{sec:results}); ablations and comparison against deep baselines~\cite{xie2015hed,liu2017rcf,he2019bdcn,pu2022edter,soria2023dexined,ye2024diffusionedge} are deferred to a forthcoming full paper.
 
