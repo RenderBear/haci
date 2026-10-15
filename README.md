@@ -9,7 +9,7 @@ A compact, fully distributed algorithm that extracts edges from RGB images throu
    L0 harmonics are summed over small, overlapping patches on a sparse cell grid. Each cell gets eight orientation-tuned responses and a dominant orientation `θ`.
 
 3. **Seed — facilitation and suppression**  
-   Each orientation response passes through Naka–Rushton gain control. Support from neighbouring cells along the contour (an association field with a learned curvature tolerance) scales the response and bridges gaps that have support on both sides. A divisive readout then divides each orientation response by the same orientation's response in the neighbouring cells, so a cell is coded relative to its same-orientation context. The result is per-cell contour density `ρ`.
+   Each orientation response passes through Naka–Rushton gain control. Support from neighbouring cells along the contour (an association field with a learned curvature tolerance) scales the response and bridges gaps that have support on both sides. A divisive readout then divides each orientation response by the same orientation's response in the neighbouring cells, so a cell is coded relative to its same-orientation context. Parallel contours on both sides of a cell (flank suppression) divide it further, which damps texture and gratings but leaves a lone edge, or an edge beside a single parallel one, untouched. The result is per-cell contour density `ρ`.
 
 4. **Render — ridge back-projection**  
    Cell `ρ` is splatted back to full resolution with learned 1D kernels aligned to local `θ`, producing a soft boundary map. Non-max suppression yields the final edge map.
@@ -31,8 +31,8 @@ Scores for `pretrained/final.pt` on the BRIND test set (200 images; the model wa
 
 | Output | ODS | Precision | Recall | OIS | AP |
 | --- | --- | --- | --- | --- | --- |
-| NMS-thinned map (`s_eval`) | 0.7072 | 0.6745 | 0.7432 | 0.7318 | 0.7549 |
-| Raw soft map (`c_eval`) | 0.7043 | 0.6777 | 0.7331 | 0.7274 | 0.6524 |
+| NMS-thinned map (`s_eval`) | 0.7183 | 0.6834 | 0.7569 | 0.7407 | 0.7641 |
+| Raw soft map (`c_eval`) | 0.7161 | 0.6882 | 0.7464 | 0.7372 | 0.6694 |
 
 Precision and recall are taken at the ODS threshold (0.74 for both maps).
 
@@ -40,9 +40,9 @@ Speed and memory, measured on MPS (Apple M4) with `baselines/speed.py`.
 
 | Resolution | Time | Host memory | GPU memory |
 | --- | --- | --- | --- |
-| 481×321 | 35 ms | 122 MB | 1.1 GB |
-| 1280×720 | 196 ms | 168 MB | 1.1 GB |
-| 1920×1080 | 444 ms | 229 MB | 2.2 GB |
+| 481×321 | 35 ms | 124 MB | 1.1 GB |
+| 1280×720 | 200 ms | 171 MB | 1.1 GB |
+| 1920×1080 | 453 ms | 232 MB | 2.2 GB |
 
 ## Structure
 
@@ -58,7 +58,7 @@ HaCI/
 ├── haci/
 │   ├── L0.py                # pixel-level contrast + gain control
 │   ├── L1.py                # cell-level z₂ moments (E, C, θ)
-│   ├── seed.py              # η_z NR + association field + same-orientation surround → cell ρ for splat
+│   ├── seed.py              # η_z NR + association field + same-orientation surround + flank suppression → cell ρ for splat
 │   ├── renderer.py          # learned ridge projection
 │   ├── splat_metal.py       # the renderer's splat as Metal kernels, used with --device mps
 │   ├── boundary_bench.py    # Berkeley boundary benchmark (ODS, OIS, AP)

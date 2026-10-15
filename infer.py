@@ -245,7 +245,7 @@ def _infer_seed_and_render(
         bmap = ridge_nms(bmap, theta=theta_map)
     rho_post_grid = rho_out.cpu().numpy().reshape(nH, nW)
     rho_nr_grid = cf_out["rho_nr"].cpu().numpy().reshape(nH, nW)
-    rho_coll_grid = cf_out["rho_coll"].cpu().numpy().reshape(nH, nW)
+    rho_assoc_grid = cf_out["rho_assoc"].cpu().numpy().reshape(nH, nW)
     sur_grid = cf_out["sur"].cpu().numpy().reshape(nH, nW)
     branch_grid = branch.cpu().numpy().reshape(nH, nW)
     supp_nb_np = supp_nb.cpu().numpy().reshape(nH, nW)
@@ -258,7 +258,7 @@ def _infer_seed_and_render(
         surface_diags,
         supp_nb_np,
         rho_nr_grid,
-        rho_coll_grid,
+        rho_assoc_grid,
         sur_grid,
     )
 
@@ -281,7 +281,7 @@ def forward_with_diagnostics(
         surface_diags,
         supp_nb_np,
         rho_nr_grid,
-        rho_coll_grid,
+        rho_assoc_grid,
         sur_grid,
     ) = _infer_seed_and_render(
         model,
@@ -301,7 +301,7 @@ def forward_with_diagnostics(
         surface_diags,
         supp_nb_np,
         rho_nr_grid,
-        rho_coll_grid,
+        rho_assoc_grid,
         sur_grid,
         timings,
     )
@@ -376,8 +376,8 @@ def main():
         "--diagnostics",
         action="store_true",
         help="Save additional diagnostics: base, l0_pinwheel, h2m (lum/chr/combined), "
-        "l1_moments, rho (row1: η_z NR, row2: after collinear+surround), "
-        "geometry (ρ_coll, S), render_softmap, render_theta_bins, overlay.",
+        "l1_moments, rho (row1: η_z NR, row2: after association field + surround), "
+        "geometry (ρ_assoc, S), render_softmap, render_theta_bins, overlay.",
     )
     ap.add_argument(
         "--gt_dir",
@@ -435,7 +435,7 @@ def main():
         diags,
         _,
         rho_nr,
-        rho_coll,
+        rho_assoc,
         sur,
         fwd_t,
     ) = forward_with_diagnostics(
@@ -487,7 +487,7 @@ def main():
         saved_files.append(p_rho)
 
         p_geom = os.path.join(od, f"{stem}_geometry.png")
-        viz_infer_geometry(rho_coll, sur, is_border, p_geom)
+        viz_infer_geometry(rho_assoc, sur, is_border, p_geom)
         saved_files.append(p_geom)
 
         gt_arr: np.ndarray | None = None

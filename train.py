@@ -561,7 +561,7 @@ def upgrade_model_state_dict(state_dict: dict) -> dict:
     }
     rename = {
         "seed._beta_raw": "seed._beta_seed_raw",
-        "seed._kappa_raw": "seed._beta_coll_raw",
+        "seed._kappa_raw": "seed._beta_assoc_raw",
         "seed._eta_raw": "seed._eta_readout_raw",
         "_l1_von_mises_kappa_raw": "seed._kappa_vm_raw",
     }
@@ -616,15 +616,16 @@ def debug_seed_batch(
     seed = model.seed
     print(
         f"\n  κ_vm={seed.kappa_vm.item():.4g}  η_z={seed.eta_z.item():.4g}  "
-        f"β_seed={seed.beta_seed.item():.4g}  β_coll={seed.beta_coll.item():.4g}  "
+        f"β_seed={seed.beta_seed.item():.4g}  β_assoc={seed.beta_assoc.item():.4g}  "
         f"η_readout={seed.eta_readout.item():.4g}  "
-        f"λ={seed.lam.item():.4g}  σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}"
+        f"λ={seed.lam.item():.4g}  σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}  "
+        f"λ_f={seed.flank_lambda.item():.4g}  σ_fl={seed.flank_sigma.item():.4g}"
     )
     for name, t in (
         ("κ_vm", seed._kappa_vm_raw),
         ("η_z", seed._eta_z_raw),
         ("β_seed", seed._beta_seed_raw),
-        ("β_coll", seed._beta_coll_raw),
+        ("β_assoc", seed._beta_assoc_raw),
         ("η_readout", seed._eta_readout_raw),
         ("λ", seed._lambda_raw),
         ("σ_f", seed._sigma_f_raw),
@@ -632,6 +633,8 @@ def debug_seed_batch(
         ("κ_a", seed._kappa_a_raw),
         ("β_gap", seed._beta_gap_raw),
         ("σ_κ", seed._sigma_kappa_raw),
+        ("λ_f", seed._flank_lambda_raw),
+        ("σ_fl", seed._flank_sigma_raw),
         ("L0 λ", model.l0_gain._lambda_raw),
         ("L0 σ_r", model.l0_gain._pool_sigma_raw),
     ):
@@ -712,11 +715,12 @@ def format_l1_param_lines(model: HaCIE2E, *, indent: str = "  ") -> list[str]:
 def format_seed_param_lines(seed, *, indent: str = "  ") -> list[str]:
     lines = [
         f"{indent}η_z={seed.eta_z.item():.4g}  β_seed={seed.beta_seed.item():.4g}  "
-        f"β_coll={seed.beta_coll.item():.4g}",
+        f"β_assoc={seed.beta_assoc.item():.4g}",
         f"{indent}η_readout={seed.eta_readout.item():.4g}  λ={seed.lam.item():.4g}  "
         f"σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}  R={seed.cross_surround_radius}",
         f"{indent}κ_a={seed.kappa_a.item():.4g}  β_gap={seed.beta_gap.item():.4g}  "
         f"σ_κ={seed.sigma_kappa.item():.4g}",
+        f"{indent}λ_f={seed.flank_lambda.item():.4g}  σ_fl={seed.flank_sigma.item():.4g}",
     ]
     return lines
 

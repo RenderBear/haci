@@ -44,7 +44,7 @@ SEED = SimpleNamespace(
     EPS=1e-9,
     ETA_Z_INIT=10.0,
     BETA_SEED_INIT=0.5,
-    BETA_COLL_INIT=0.5,
+    BETA_ASSOC_INIT=0.5,
     ETA_READOUT_INIT=0.30,
     LAMBDA_INIT=0.5,
     SIGMA_F_INIT=2.0,
@@ -60,6 +60,16 @@ SEED = SimpleNamespace(
     # read an edge's own energy; σ_s ≈ 1 ranked candidates best on the trained model.
     SURROUND_RADIUS=10,
     SIGMA_S_INIT=1.0,
+    # Flank suppression: the readout is also divided by λ_f·HM(F+, F-)², the same bin's support on
+    # either side of the cell along its normal (Gaussian σ_fl in cells, κ tuning to the normal), cells
+    # that share pixels with the centre left out. The harmonic mean needs both flanks occupied
+    # (texture, gratings), so a lone edge, or one beside a single parallel edge, is spared.
+    # λ_f ≈ 0 at init is the model without it.
+    FLANK_LAMBDA_INIT=1e-2,
+    FLANK_SIGMA_INIT=2.0,
+    FLANK_SIGMA_MIN=1.0,
+    FLANK_KAPPA=2.0,
+    FLANK_RADIUS=5,
     RHO_STE_TAU=0.1,
 )
 

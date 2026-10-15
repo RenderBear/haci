@@ -1,4 +1,4 @@
-r"""Cell-grid contour seed — per-orientation-bin NR, co-circular association field, same-orientation surround, readout"""
+r"""Cell-grid contour seed — per-orientation-bin NR, co-circular association field, same-orientation surround, flank suppression, readout"""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover
 
 _ETA_Z_INIT = float(getattr(SEED, "ETA_Z_INIT", 0.30))
 _BETA_SEED_INIT = float(getattr(SEED, "BETA_SEED_INIT", 0.5))
-_BETA_COLL_INIT = float(getattr(SEED, "BETA_COLL_INIT", 0.5))
+_BETA_ASSOC_INIT = float(getattr(SEED, "BETA_ASSOC_INIT", 0.5))
 _ETA_READOUT_INIT = float(
     getattr(SEED, "ETA_READOUT_INIT", getattr(SEED, "ETA_INIT", 0.30))
 )
@@ -40,6 +40,15 @@ _SIGMA_F_MIN = float(getattr(SEED, "SIGMA_F_MIN", 1.0))
 _KAPPA_A_INIT = float(getattr(SEED, "KAPPA_A_INIT", 8.0))
 _BETA_GAP_INIT = float(getattr(SEED, "BETA_GAP_INIT", 0.5))
 _SIGMA_KAPPA_INIT = float(getattr(SEED, "SIGMA_KAPPA_INIT", 1e-2))
+_FLANK_LAMBDA_INIT = float(getattr(SEED, "FLANK_LAMBDA_INIT", 1e-2))
+_FLANK_SIGMA_INIT = float(getattr(SEED, "FLANK_SIGMA_INIT", 2.0))
+_FLANK_SIGMA_MIN = float(getattr(SEED, "FLANK_SIGMA_MIN", 1.0))
+_FLANK_KAPPA = float(getattr(SEED, "FLANK_KAPPA", 2.0))
+_FLANK_RADIUS = int(getattr(SEED, "FLANK_RADIUS", 5))
+# Cells within this Chebyshev distance share pixels with the centre cell (d·S < P), so they carry the
+# cell's own edge and are left out of the flanks.
+_P = int(getattr(L1, "PATCH_SIZE", 5))
+_FLANK_EXCLUDE = math.ceil(_P / (_P - int(getattr(L1, "PATCH_OVERLAP", 3)))) - 1
 
 
 def _inv_softplus(x: float) -> float:
@@ -171,6 +180,47 @@ def surround_bins_same(
     return smoothed / (w_acc + eps)
 
 
+def flank_bins(
+    rho_nr: torch.Tensor,
+    bar_theta: torch.Tensor,
+    *,
+    sigma: torch.Tensor,
+    kappa: float,
+    radius: int,
+    exclude: int,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Same-orientation support on either side of each cell along bin k's normal (its flanks).
+
+    w(δ) = exp(-|δ|²/2σ²) · exp(κ(cos 2ψ_n - 1)), ψ_n = angle between δ and the normal. The sides
+    n > 0 and n < 0 are normalised separately, like the association lobes. Cells within Chebyshev
+    distance `exclude` share pixels with the centre cell and are left out, so a lone edge, which
+    spreads into its overlapping neighbours, does not flank itself.
+    """
+    nH, nW, K = rho_nr.shape
+    dtype, dev = rho_nr.dtype, rho_nr.device
+    r = torch.arange(-radius, radius + 1, device=dev, dtype=dtype)
+    dy, dx = torch.meshgrid(r, r, indexing="ij")
+    d2 = dy * dy + dx * dx
+    ct = torch.cos(bar_theta).view(K, 1, 1)
+    st = torch.sin(bar_theta).view(K, 1, 1)
+    t = dy * ct + dx * st
+    n = -dy * st + dx * ct
+    cos2psi_n = (n * n - t * t) / d2.clamp_min(1.0)
+    radial = torch.exp(-d2 / (2.0 * (sigma * sigma).clamp_min(eps)))
+    w = radial * torch.exp(kappa * (cos2psi_n - 1.0))
+    far = torch.maximum(dy.abs(), dx.abs()) > exclude
+    w_pos = w * (far & (n > 1e-6)).to(dtype)
+    w_neg = w * (far & (n < -1e-6)).to(dtype)
+
+    # One group per bin: bin k's two side kernels read only bin k.
+    bank = torch.stack([w_pos, w_neg], dim=1).reshape(2 * K, 1, 2 * radius + 1, 2 * radius + 1)
+    both = _reflect_conv_hwk(rho_nr, bank, groups=K).reshape(nH, nW, K, 2)
+    f_pos = both[..., 0] / (w_pos.sum(dim=(-2, -1)).view(1, 1, K) + eps)
+    f_neg = both[..., 1] / (w_neg.sum(dim=(-2, -1)).view(1, 1, K) + eps)
+    return f_pos, f_neg
+
+
 def rho_ste_hard_max(rho_out: torch.Tensor, tau: float) -> torch.Tensor:
     w = Fn.softmax(rho_out / float(tau), dim=-1)
     hard = rho_out.max(dim=-1).values
@@ -200,7 +250,7 @@ class ContourSeed(nn.Module):
         eps: float = SEED.EPS,
         eta_z_init: float = _ETA_Z_INIT,
         beta_seed_init: float = _BETA_SEED_INIT,
-        beta_coll_init: float = _BETA_COLL_INIT,
+        beta_assoc_init: float = _BETA_ASSOC_INIT,
         eta_readout_init: float = _ETA_READOUT_INIT,
         lambda_init: float = _LAMBDA_INIT,
         sigma_f_init: float = _SIGMA_F_INIT,
@@ -213,6 +263,10 @@ class ContourSeed(nn.Module):
         kappa_a_init: float = _KAPPA_A_INIT,
         beta_gap_init: float = _BETA_GAP_INIT,
         sigma_kappa_init: float = _SIGMA_KAPPA_INIT,
+        flank_lambda_init: float = _FLANK_LAMBDA_INIT,
+        flank_sigma_init: float = _FLANK_SIGMA_INIT,
+        flank_kappa: float = _FLANK_KAPPA,
+        flank_radius: int = _FLANK_RADIUS,
         *,
         surround_radius: int | None = None,
         **kw,
@@ -226,6 +280,9 @@ class ContourSeed(nn.Module):
         self.facil_radius = int(facil_radius)
         self.cross_surround_radius = int(cross_surround_radius)
         self.rho_ste_tau = float(rho_ste_tau)
+        self.flank_kappa = float(flank_kappa)
+        self.flank_radius = int(flank_radius)
+        self.flank_exclude = _FLANK_EXCLUDE
 
         dev0 = torch.device("cpu")
         tb = orientation_bin_centers(self.K, dev0, torch.float32)
@@ -234,7 +291,7 @@ class ContourSeed(nn.Module):
         self._kappa_vm_raw = nn.Parameter(torch.tensor(_inv_softplus(kappa_vm_init)))
         self._eta_z_raw = nn.Parameter(torch.tensor(_inv_softplus(eta_z_init)))
         self._beta_seed_raw = nn.Parameter(torch.tensor(_inv_softplus(beta_seed_init)))
-        self._beta_coll_raw = nn.Parameter(torch.tensor(_inv_softplus(beta_coll_init)))
+        self._beta_assoc_raw = nn.Parameter(torch.tensor(_inv_softplus(beta_assoc_init)))
         self._eta_readout_raw = nn.Parameter(torch.tensor(_inv_softplus(eta_readout_init)))
         self._lambda_raw = nn.Parameter(torch.tensor(_inv_softplus(lambda_init)))
         # σ_f = floor + softplus(raw): unlike a clamp, the gradient never dies at the floor.
@@ -245,6 +302,12 @@ class ContourSeed(nn.Module):
         self._sigma_s_raw = nn.Parameter(torch.tensor(_inv_softplus(sigma_s_init)))
         # Curvature tolerance of the association field, in 1/cell; ≈ 0 starts collinear.
         self._sigma_kappa_raw = nn.Parameter(torch.tensor(_inv_softplus(sigma_kappa_init)))
+        # Flank suppression weight (≈ 0 starts without it) and reach in cells, floored like σ_f.
+        self._flank_lambda_raw = nn.Parameter(torch.tensor(_inv_softplus(flank_lambda_init)))
+        self.flank_sigma_min = _FLANK_SIGMA_MIN
+        self._flank_sigma_raw = nn.Parameter(
+            torch.tensor(_inv_softplus(flank_sigma_init - self.flank_sigma_min))
+        )
 
     @property
     def kappa_vm(self) -> torch.Tensor:
@@ -259,8 +322,8 @@ class ContourSeed(nn.Module):
         return Fn.softplus(self._beta_seed_raw).view(())
 
     @property
-    def beta_coll(self) -> torch.Tensor:
-        return Fn.softplus(self._beta_coll_raw).view(())
+    def beta_assoc(self) -> torch.Tensor:
+        return Fn.softplus(self._beta_assoc_raw).view(())
 
     @property
     def eta_readout(self) -> torch.Tensor:
@@ -291,6 +354,14 @@ class ContourSeed(nn.Module):
         return Fn.softplus(self._sigma_s_raw).view(()).clamp_min(0.3)
 
     @property
+    def flank_lambda(self) -> torch.Tensor:
+        return Fn.softplus(self._flank_lambda_raw).view(())
+
+    @property
+    def flank_sigma(self) -> torch.Tensor:
+        return self.flank_sigma_min + Fn.softplus(self._flank_sigma_raw).view(())
+
+    @property
     def surround_radius(self) -> int:
         return self.cross_surround_radius
 
@@ -300,7 +371,7 @@ class ContourSeed(nn.Module):
 
     @property
     def kappa(self) -> torch.Tensor:
-        return self.beta_coll
+        return self.beta_assoc
 
     def forward(
         self,
@@ -349,12 +420,12 @@ class ContourSeed(nn.Module):
             radius=self.facil_radius,
             eps=eps,
         )
-        rho_coll = 0.5 * (f_fwd + f_bwd)
-        # Gain: collinear support scales the cell's own response, so it cannot create edges
+        rho_assoc = 0.5 * (f_fwd + f_bwd)
+        # Gain: association-field support scales the cell's own response, so it cannot create edges
         # past line ends. Bridge: harmonic mean of the two lobes, non-zero only when support
         # exists on both sides, so it fills gaps without extending ends.
         bridge = 2.0 * f_fwd * f_bwd / (f_fwd + f_bwd + eps)
-        gain = self.beta_seed + self.beta_coll * rho_coll
+        gain = self.beta_seed + self.beta_assoc * rho_assoc
         e = rho_nr * gain + self.beta_gap * bridge
 
         # Divisive pool from the same orientation channel's neighbours; facilitation stays in e.
@@ -365,10 +436,23 @@ class ContourSeed(nn.Module):
             eps=eps,
         )
 
+        # Flank suppression: same-orientation contours on both sides along the normal (texture,
+        # gratings). The harmonic mean is non-zero only when both flanks are occupied.
+        f_pos, f_neg = flank_bins(
+            rho_nr,
+            bar_theta,
+            sigma=self.flank_sigma,
+            kappa=self.flank_kappa,
+            radius=self.flank_radius,
+            exclude=self.flank_exclude,
+            eps=eps,
+        )
+        flank = 2.0 * f_pos * f_neg / (f_pos + f_neg + eps)
+
         e2 = e * e
         eta_r = self.eta_readout * self.eta_readout
         pool = self.lam * (S * S)
-        denom_r = e2 + eta_r + pool + eps
+        denom_r = e2 + eta_r + pool + eps + self.flank_lambda * (flank * flank)
         rho_out = (e2 / denom_r) * ok.unsqueeze(-1)
 
         rho_cell = rho_ste_hard_max(rho_out, self.rho_ste_tau)
@@ -384,12 +468,13 @@ class ContourSeed(nn.Module):
         cf_out["rho_nr"] = rho_nr.mean(dim=-1)
         cf_out["rho_seed"] = rho_nr.mean(dim=-1)
         cf_out["rho_nr_bins"] = rho_nr
-        cf_out["rho_coll"] = (rho_coll * ok.unsqueeze(-1)).mean(dim=-1)
-        cf_out["rho_coll_bins"] = rho_coll * ok.unsqueeze(-1)
-        cf_out["fac"] = cf_out["rho_coll"]
+        cf_out["rho_assoc"] = (rho_assoc * ok.unsqueeze(-1)).mean(dim=-1)
+        cf_out["rho_assoc_bins"] = rho_assoc * ok.unsqueeze(-1)
+        cf_out["fac"] = cf_out["rho_assoc"]
         cf_out["exc"] = (e * ok.unsqueeze(-1)).mean(dim=-1)
         cf_out["sur"] = (S * ok.unsqueeze(-1)).mean(dim=-1)
         cf_out["sur_bins"] = S * ok.unsqueeze(-1)
+        cf_out["flank_bins"] = flank * ok.unsqueeze(-1)
         cf_out["drive"] = rho_bin.mean(dim=-1) * ok
         cf_out["g_R"] = cf_out["exc"]
         cf_out["g_E"] = cf_out["sur"]
@@ -404,9 +489,9 @@ class ContourSeed(nn.Module):
         diags = None
         if return_surface_diags:
             ra = rho_flat[~is_border.reshape(N)]
-            rc = cf_out["rho_coll"].reshape(-1)[~is_border.reshape(N)]
+            rc = cf_out["rho_assoc"].reshape(-1)[~is_border.reshape(N)]
             diags = {
-                "rho_coll": cf_out["rho_coll"].detach().cpu().numpy(),
+                "rho_assoc": cf_out["rho_assoc"].detach().cpu().numpy(),
                 "iter_stats": [{
                     "rho_mean": float(rho_flat.mean().detach()),
                     "rho_max": float(rho_flat.max().detach()),
@@ -415,7 +500,7 @@ class ContourSeed(nn.Module):
                     ) if ra.numel() else 0.0,
                     "n_interior": int(ok.sum().item()),
                     "fac_mean": float(rc.mean().detach()) if rc.numel() else 0.0,
-                    "coll_mean": float(rc.mean().detach()) if rc.numel() else 0.0,
+                    "assoc_mean": float(rc.mean().detach()) if rc.numel() else 0.0,
                     "sur_mean": float(cf_out["sur"].mean().detach()),
                 }],
             }

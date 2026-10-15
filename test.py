@@ -133,10 +133,10 @@ def run_image_inference(
             is_b = cf_dev["is_border"].detach().cpu().numpy().reshape(nH, nW).astype(bool)
             p_rho = os.path.join(diagnostics_dir, f"{stem}_rho.png")
             viz_infer_rho(rho_nr, rho_post, is_b, p_rho)
-            rho_coll = cf_out["rho_coll"].detach().cpu().numpy().reshape(nH, nW)
+            rho_assoc = cf_out["rho_assoc"].detach().cpu().numpy().reshape(nH, nW)
             sur = cf_out["sur"].detach().cpu().numpy().reshape(nH, nW)
             p_geom = os.path.join(diagnostics_dir, f"{stem}_geometry.png")
-            viz_infer_geometry(rho_coll, sur, is_b, p_geom)
+            viz_infer_geometry(rho_assoc, sur, is_b, p_geom)
 
         bmap_t, theta_t = bmap_t[:H0, :W0], theta_t[:H0, :W0]
         # On a GPU, thin before copying the maps to the host. The CPU keeps the NumPy NMS.
