@@ -28,7 +28,7 @@ from haci.L1 import (
     pad_for_patch_grid,
     compute_cell_moments,
 )
-from haci.seed import AndGateSeed
+from haci.seed import ContourSeed
 from haci.renderer import (
     ModulationRenderer,
     render_boundary_map_torch,
@@ -239,7 +239,7 @@ class HaCIE2E(nn.Module):
         self.l0_metric = L0LearnedMetric()
         self.l0_notch = L0Notch() if bool(getattr(L0, "NOTCH_ENABLED", False)) else None
         self.l0_gain = L0GainControl()
-        self.seed = AndGateSeed(eps=eps)
+        self.seed = ContourSeed(eps=eps)
         self.renderer = ModulationRenderer()
         self.eps = eps
         self.render_eps = max(float(eps), 1e-6)
@@ -617,26 +617,26 @@ def debug_seed_batch(
     print(
         f"\n  κ_vm={seed.kappa_vm.item():.4g}  η_z={seed.eta_z.item():.4g}  "
         f"β_seed={seed.beta_seed.item():.4g}  β_assoc={seed.beta_assoc.item():.4g}  "
-        f"η_readout={seed.eta_readout.item():.4g}  "
+        f"η_r={seed.eta_readout.item():.4g}  "
         f"λ={seed.lam.item():.4g}  σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}  "
-        f"λ_f={seed.flank_lambda.item():.4g}  σ_fl={seed.flank_sigma.item():.4g}"
+        f"λ_fl={seed.flank_lambda.item():.4g}  σ_fl={seed.flank_sigma.item():.4g}"
     )
     for name, t in (
         ("κ_vm", seed._kappa_vm_raw),
         ("η_z", seed._eta_z_raw),
         ("β_seed", seed._beta_seed_raw),
         ("β_assoc", seed._beta_assoc_raw),
-        ("η_readout", seed._eta_readout_raw),
+        ("η_r", seed._eta_readout_raw),
         ("λ", seed._lambda_raw),
         ("σ_f", seed._sigma_f_raw),
         ("σ_S", seed._sigma_s_raw),
         ("κ_a", seed._kappa_a_raw),
         ("β_gap", seed._beta_gap_raw),
         ("σ_κ", seed._sigma_kappa_raw),
-        ("λ_f", seed._flank_lambda_raw),
+        ("λ_fl", seed._flank_lambda_raw),
         ("σ_fl", seed._flank_sigma_raw),
-        ("L0 λ", model.l0_gain._lambda_raw),
-        ("L0 σ_r", model.l0_gain._pool_sigma_raw),
+        ("λ_0", model.l0_gain._lambda_raw),
+        ("σ_r", model.l0_gain._pool_sigma_raw),
     ):
         if t.grad is None:
             print(f"  |grad| {name}: grad=None")
@@ -716,11 +716,11 @@ def format_seed_param_lines(seed, *, indent: str = "  ") -> list[str]:
     lines = [
         f"{indent}η_z={seed.eta_z.item():.4g}  β_seed={seed.beta_seed.item():.4g}  "
         f"β_assoc={seed.beta_assoc.item():.4g}",
-        f"{indent}η_readout={seed.eta_readout.item():.4g}  λ={seed.lam.item():.4g}  "
-        f"σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}  R={seed.cross_surround_radius}",
+        f"{indent}η_r={seed.eta_readout.item():.4g}  λ={seed.lam.item():.4g}  "
+        f"σ_f={seed.sigma_f.item():.4g}  σ_S={seed.sigma_s.item():.4g}  R_S={seed.surround_radius}",
         f"{indent}κ_a={seed.kappa_a.item():.4g}  β_gap={seed.beta_gap.item():.4g}  "
         f"σ_κ={seed.sigma_kappa.item():.4g}",
-        f"{indent}λ_f={seed.flank_lambda.item():.4g}  σ_fl={seed.flank_sigma.item():.4g}",
+        f"{indent}λ_fl={seed.flank_lambda.item():.4g}  σ_fl={seed.flank_sigma.item():.4g}",
     ]
     return lines
 
@@ -736,8 +736,8 @@ def format_renderer_param_lines(r, *, indent: str = "  ") -> list[str]:
     center = int(hw)
     return [
         f"{indent}H_w={hw}  T_gate={r.gate_temp.item():.4g}  "
-        f"κ_max={r.kappa_max.item():.4g}  e_max={r.ext_max.item():.4g}  "
-        f"δ_n={r.delta_n_max.item():.4g}  α_r={r.alpha_range.item():.4g}",
+        f"κ_max={r.kappa_max.item():.4g}  ξ_max={r.xi_max.item():.4g}  "
+        f"δ_n,max={r.delta_n_max.item():.4g}  α_range={r.alpha_range.item():.4g}",
         f"{indent}h_perp: min={float(h_perp.min()):+.3f}  "
         f"ctr={float(h_perp[center]):+.3f}  max={float(h_perp.max()):+.3f}",
         f"{indent}h_par peak={float(h_par[center]):.4g}",

@@ -31,7 +31,7 @@ static float log1m(float c) {
 }
 
 // pairs: per active (cell, bin), sorted by anchor tile:
-//   ax, ay, cos, sin, kappa, ext_s, amplitude, cos 2θ, sin 2θ
+//   ax, ay, cos, sin, kappa, xi, amplitude, cos 2θ, sin 2θ
 // out:   per pixel: Σ log(1 - claim), Σ claim·cos 2θ, Σ claim·sin 2θ
 kernel void splat(device float* out,
                   device const float* pairs,
@@ -83,7 +83,7 @@ kernel void splat(device float* out,
 
 // Gradient of the first sum, one thread per pair: walks the pair's window, reads dL/d(sum) at
 // each pixel and chains back through the same sample formula as above.
-// out: per pair: d/d amplitude, d/d ax, d/d ay, d/d kappa, d/d ext_s, then that pair's share
+// out: per pair: d/d amplitude, d/d ax, d/d ay, d/d kappa, d/d xi, then that pair's share
 //      of d/d h_perp[0..ntap) and d/d h_par[0..ntap)
 kernel void splat_grad(device float* out,
                        device const float* pairs,
@@ -101,7 +101,7 @@ kernel void splat_grad(device float* out,
     int ax_int = int(ax_floor), ay_int = int(ay_floor);
     float ax_f = pairs[q] - ax_floor, ay_f = pairs[q + 1] - ay_floor;
     float ca = pairs[q + 2], sa = pairs[q + 3];
-    float kappa = pairs[q + 4], ext_s = pairs[q + 5], amp = pairs[q + 6];
+    float kappa = pairs[q + 4], xi = pairs[q + 5], amp = pairs[q + 6];
 
     float g_amp = 0.0f, g_ax = 0.0f, g_ay = 0.0f, g_kappa = 0.0f, g_ext = 0.0f;
     float g_perp[MAX_TAPS], g_par[MAX_TAPS];
@@ -120,7 +120,7 @@ kernel void splat_grad(device float* out,
             float dy = float(oy) - ay_f;
             float s = dy * ca + dx * sa;
             float n = -dy * sa + dx * ca;
-            float s_tilde = s - ext_s;
+            float s_tilde = s - xi;
             float n_curv = n - 0.5f * kappa * (s_tilde * s_tilde);
 
             // interp_kernel, keeping the tap index, fraction and slope for the chain rule
@@ -155,7 +155,7 @@ kernel void splat_grad(device float* out,
             g_par[q_lo + 1] += q_fr * d_hq;
 
             float d_n = d_hp * p_slope;                          // n_curv = n - kappa * s_tilde^2 / 2
-            float d_s = d_hq * q_slope - d_n * kappa * s_tilde;  // s_tilde = s - ext_s
+            float d_s = d_hq * q_slope - d_n * kappa * s_tilde;  // s_tilde = s - xi
             g_kappa -= d_n * 0.5f * (s_tilde * s_tilde);
             g_ext -= d_s;
             g_ax -= d_s * sa + d_n * ca;                         // dx = ox - frac(ax)
@@ -186,11 +186,11 @@ def _kernels():
     return _lib
 
 
-def _pack(amp, ax_eff, ay_eff, cos_a, sin_a, kappa, ext_s) -> torch.Tensor:
+def _pack(amp, ax_eff, ay_eff, cos_a, sin_a, kappa, xi) -> torch.Tensor:
     bar_theta = torch.atan2(sin_a, cos_a)
     return torch.stack(
         [
-            ax_eff, ay_eff, cos_a, sin_a, kappa, ext_s, amp,
+            ax_eff, ay_eff, cos_a, sin_a, kappa, xi, amp,
             torch.cos(2.0 * bar_theta), torch.sin(2.0 * bar_theta),
         ],
         dim=1,
@@ -201,7 +201,7 @@ class _SplatSums(torch.autograd.Function):
     """Per pixel: Σ log(1 − claim) and the two orientation moments (the moments carry no gradient)."""
 
     @staticmethod
-    def forward(ctx, amp, ax_eff, ay_eff, kappa, ext_s, h_perp, h_par, cos_a, sin_a, hw, H, W, clip):
+    def forward(ctx, amp, ax_eff, ay_eff, kappa, xi, h_perp, h_par, cos_a, sin_a, hw, H, W, clip):
         device = amp.device
         A = amp.shape[0]
         T = _TILE
@@ -218,7 +218,7 @@ class _SplatSums(torch.autograd.Function):
             tile[order], torch.arange(ntx * nty + 1, device=device),
         ).to(torch.int32)
 
-        pairs = _pack(amp, ax_eff, ay_eff, cos_a, sin_a, kappa, ext_s)
+        pairs = _pack(amp, ax_eff, ay_eff, cos_a, sin_a, kappa, xi)
         h_perp = h_perp.to(torch.float32).contiguous()
         h_par = h_par.to(torch.float32).contiguous()
         cfg = torch.tensor([W, ntx, nty, T, hw, _NF], device=device, dtype=torch.int32)
@@ -266,7 +266,7 @@ def splat_fused(
     cos_a: torch.Tensor,
     sin_a: torch.Tensor,
     kappa_active: torch.Tensor,
-    ext_s_active: torch.Tensor,
+    xi_active: torch.Tensor,
     h_perp: torch.Tensor,
     h_par: torch.Tensor,
     kernel_h_w: int,
@@ -283,7 +283,7 @@ def splat_fused(
     """
     device, dtype = rho_active.device, rho_active.dtype
     log_neg, mom = _SplatSums.apply(
-        alpha_active * gate_active * rho_active, ax_eff, ay_eff, kappa_active, ext_s_active,
+        alpha_active * gate_active * rho_active, ax_eff, ay_eff, kappa_active, xi_active,
         h_perp, h_par, cos_a, sin_a, int(kernel_h_w), H, W, float(claim_clip),
     )
     bmap = (-torch.expm1(log_neg)).to(dtype=dtype)

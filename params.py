@@ -39,7 +39,7 @@ L1 = SimpleNamespace(
     KAPPA_VM_INIT=2.0,
 )
 
-# ── Seed: η_z NR on |Z|, then co-circular + surround + divisive readout (η_readout) ─
+# ── Seed: η_z NR on |Z|, then co-circular + surround + divisive readout (η_r) ─────────
 SEED = SimpleNamespace(
     EPS=1e-9,
     ETA_Z_INIT=10.0,
@@ -56,15 +56,15 @@ SEED = SimpleNamespace(
     SIGMA_KAPPA_INIT=1e-2,
     FACIL_RADIUS=5,
     # Readout pool: each orientation bin divided by the same bin's neighbouring cells (centre
-    # excluded), Gaussian σ_s in cells. Replaced the sin²Δθ cross-orientation pool, which at broad κ_vm
-    # read an edge's own energy; σ_s ≈ 1 ranked candidates best on the trained model.
+    # excluded), Gaussian σ_S in cells. Replaced the sin²Δθ cross-orientation pool, which at broad κ_vm
+    # read an edge's own energy; σ_S ≈ 1 ranked candidates best on the trained model.
     SURROUND_RADIUS=10,
     SIGMA_S_INIT=1.0,
-    # Flank suppression: the readout is also divided by λ_f·HM(F+, F-)², the same bin's support on
+    # Flank suppression: the readout is also divided by λ_fl·HM(U+, U-)², the same bin's support on
     # either side of the cell along its normal (Gaussian σ_fl in cells, κ tuning to the normal), cells
     # that share pixels with the centre left out. The harmonic mean needs both flanks occupied
     # (texture, gratings), so a lone edge, or one beside a single parallel edge, is spared.
-    # λ_f ≈ 0 at init is the model without it.
+    # λ_fl ≈ 0 at init is the model without it.
     FLANK_LAMBDA_INIT=1e-2,
     FLANK_SIGMA_INIT=2.0,
     FLANK_SIGMA_MIN=1.0,
@@ -79,26 +79,17 @@ RENDER = SimpleNamespace(
     DEPOSIT_HALF_WIDTH_MIN=4,
     DEPOSIT_HALF_WIDTH_MAX=24,
 
-    SIGMA_PERP_INIT=0.6,
     SIGMA_PAR_INIT=2.0,
     RAMP_CUTOFF_INIT=0.5,
 
     KAPPA_MAX_INIT=0.1,
-    EXT_MAX_INIT=1.0,
+    XI_MAX_INIT=1.0,
     DELTA_N_MAX_INIT=1.0,
     ALPHA_RANGE_INIT=0.5,
 
     BIN_GATE_TEMP_INIT=0.08,
 
     CORR_HIDDEN=12,
-
-    DEPOSIT_ENVELOPE_SIGMA=0.0,
-    SIGMA_PAR_MAX=32.0,
-    SIGMA_PERP_MAX=8.0,
-    SPLAT_RADIUS_SIGMAS=3.0,
-    THETA_SMOOTH_PASSES=0,
-    THINNING_IN=30,
-    THINNING_HIDDEN=12,
 )
 
 # ── Training ───────────────────────────────────────────────────────────────

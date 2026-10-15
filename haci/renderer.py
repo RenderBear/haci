@@ -33,12 +33,11 @@ _FEATURE_DIM = 5
 _HIDDEN_DIM = int(getattr(RENDER, "CORR_HIDDEN", 12))
 _OUT_DIM = 4
 
-_SIGMA_PERP_INIT = float(getattr(RENDER, "SIGMA_PERP_INIT", 0.6))
 _SIGMA_PAR_INIT  = float(getattr(RENDER, "SIGMA_PAR_INIT", 2.0))
 _RAMP_CUTOFF_INIT = float(getattr(RENDER, "RAMP_CUTOFF_INIT", 0.5))
 
 _KAPPA_MAX_INIT    = float(getattr(RENDER, "KAPPA_MAX_INIT", 0.1))
-_EXT_MAX_INIT      = float(getattr(RENDER, "EXT_MAX_INIT", 1.0))
+_XI_MAX_INIT       = float(getattr(RENDER, "XI_MAX_INIT", 1.0))
 _DELTA_N_MAX_INIT  = float(getattr(RENDER, "DELTA_N_MAX_INIT", 1.0))
 _ALPHA_RANGE_INIT  = float(getattr(RENDER, "ALPHA_RANGE_INIT", 0.5))
 
@@ -56,7 +55,7 @@ def _inv_softplus(x: float) -> float:
     return math.log(math.expm1(max(float(x), 1e-8)))
 
 
-def _init_phi_perp_raw_hann(kernel_h_w: int, omega_c: float) -> torch.Tensor:
+def _init_nu_perp_raw_hann(kernel_h_w: int, omega_c: float) -> torch.Tensor:
     H = kernel_h_w
     L = 2 * H + 1
     oc = max(min(float(omega_c), 0.5), 1e-3)
@@ -72,12 +71,12 @@ def _init_phi_perp_raw_hann(kernel_h_w: int, omega_c: float) -> torch.Tensor:
 
 def _windowed_ramp_from_logits(
     kernel_h_w: int,
-    phi_perp_raw: torch.Tensor,
+    nu_perp_raw: torch.Tensor,
 ) -> torch.Tensor:
     H = kernel_h_w
-    device = phi_perp_raw.device
-    dtype = phi_perp_raw.dtype
-    raw = phi_perp_raw
+    device = nu_perp_raw.device
+    dtype = nu_perp_raw.dtype
+    raw = nu_perp_raw
     L = 2 * H + 1
 
     W0 = F.softplus(raw[0:1])
@@ -219,7 +218,7 @@ def _chunk_log_neg(
     ca: torch.Tensor,
     sa: torch.Tensor,
     kappa_c: torch.Tensor,
-    ext_s_c: torch.Tensor,
+    xi_c: torch.Tensor,
     ox_l: torch.Tensor,
     oy_l: torch.Tensor,
     h_perp_l: torch.Tensor,
@@ -233,7 +232,7 @@ def _chunk_log_neg(
     s =  dy * ca + dx * sa
     n = -dy * sa + dx * ca
 
-    s_tilde = s - ext_s_c.unsqueeze(1)
+    s_tilde = s - xi_c.unsqueeze(1)
     n_curv  = n - 0.5 * kappa_c.unsqueeze(1) * (s_tilde * s_tilde)
 
     h_perp_val = _interp_kernel(h_perp_l, n_curv,  half_w)
@@ -256,7 +255,7 @@ def _backproject_deposit(
     cos_a: torch.Tensor,
     sin_a: torch.Tensor,
     kappa_active: torch.Tensor,
-    ext_s_active: torch.Tensor,
+    xi_active: torch.Tensor,
     delta_n_active: torch.Tensor,
     h_perp: torch.Tensor,
     h_par: torch.Tensor,
@@ -295,7 +294,7 @@ def _backproject_deposit(
 
         return splat_fused(
             rho_active, gate_active, alpha_active, ax_eff, ay_eff, cos_a, sin_a,
-            kappa_active, ext_s_active, h_perp, h_par, half_w, H, W,
+            kappa_active, xi_active, h_perp, h_par, half_w, H, W,
             claim_clip=_CLAIM_CLIP, with_theta=with_theta,
         )
 
@@ -327,7 +326,7 @@ def _backproject_deposit(
         chunk_args = (
             rho_active[b0:b1], gate_active[b0:b1], alpha_active[b0:b1],
             ax_f, ay_f, ca, sa,
-            kappa_active[b0:b1], ext_s_active[b0:b1],
+            kappa_active[b0:b1], xi_active[b0:b1],
             ox, oy,
             h_perp, h_par,
             in_bounds, half_w,
@@ -389,8 +388,8 @@ class ModulationRenderer(nn.Module):
 
         self.correction = CorrectionMLP()
 
-        self._phi_perp_raw = nn.Parameter(
-            _init_phi_perp_raw_hann(H, _RAMP_CUTOFF_INIT)
+        self._nu_perp_raw = nn.Parameter(
+            _init_nu_perp_raw_hann(H, _RAMP_CUTOFF_INIT)
         )
 
         sig_a = max(_SIGMA_PAR_INIT, 1e-6)
@@ -398,12 +397,12 @@ class ModulationRenderer(nn.Module):
             math.exp(-(2 * j + 1) / (2.0 * sig_a * sig_a))
             for j in range(H)
         ], dtype=torch.float32).clamp(1e-6, 1.0 - 1e-6)
-        psi_init_raw = torch.log(ratios_init / (1.0 - ratios_init))
-        self._psi_par_raw = nn.Parameter(psi_init_raw)
+        zeta_init_raw = torch.log(ratios_init / (1.0 - ratios_init))
+        self._zeta_par_raw = nn.Parameter(zeta_init_raw)
         self._h_par_peak_raw = nn.Parameter(torch.tensor(_inv_softplus(1.0)))
 
         self._kappa_max_raw   = nn.Parameter(torch.tensor(_inv_softplus(_KAPPA_MAX_INIT)))
-        self._ext_max_raw     = nn.Parameter(torch.tensor(_inv_softplus(_EXT_MAX_INIT)))
+        self._xi_max_raw      = nn.Parameter(torch.tensor(_inv_softplus(_XI_MAX_INIT)))
         self._delta_n_max_raw = nn.Parameter(torch.tensor(_inv_softplus(_DELTA_N_MAX_INIT)))
         self._alpha_range_raw = nn.Parameter(torch.tensor(_inv_softplus(_ALPHA_RANGE_INIT)))
 
@@ -414,13 +413,13 @@ class ModulationRenderer(nn.Module):
 
     @property
     def h_perp(self) -> torch.Tensor:
-        return _windowed_ramp_from_logits(self._kernel_h_w, self._phi_perp_raw)
+        return _windowed_ramp_from_logits(self._kernel_h_w, self._nu_perp_raw)
 
     @property
     def h_par(self) -> torch.Tensor:
         H = self._kernel_h_w
         peak = F.softplus(self._h_par_peak_raw)
-        ratios = torch.sigmoid(self._psi_par_raw)
+        ratios = torch.sigmoid(self._zeta_par_raw)
         cumprod = torch.cumprod(ratios, dim=0)
         tilde_h = torch.cat([
             torch.ones(1, device=ratios.device, dtype=ratios.dtype),
@@ -435,8 +434,8 @@ class ModulationRenderer(nn.Module):
         return F.softplus(self._kappa_max_raw).view(())
 
     @property
-    def ext_max(self) -> torch.Tensor:
-        return F.softplus(self._ext_max_raw).view(())
+    def xi_max(self) -> torch.Tensor:
+        return F.softplus(self._xi_max_raw).view(())
 
     @property
     def delta_n_max(self) -> torch.Tensor:
@@ -453,39 +452,6 @@ class ModulationRenderer(nn.Module):
     @property
     def kernel_h_w(self) -> int:
         return int(self._kernel_h_w)
-
-
-    @property
-    def sigma_perp(self) -> torch.Tensor:
-        return torch.tensor(_SIGMA_PERP_INIT, dtype=torch.float32)
-
-    @property
-    def sigma_par(self) -> torch.Tensor:
-        return torch.tensor(_SIGMA_PAR_INIT, dtype=torch.float32)
-
-    @property
-    def ext_scale(self) -> torch.Tensor:
-        return torch.zeros((), dtype=torch.float32)
-
-    @property
-    def sigma_pre(self) -> torch.Tensor:
-        return torch.zeros((), dtype=torch.float32)
-
-    @property
-    def smooth_sigma(self) -> torch.Tensor:
-        return torch.zeros((), dtype=torch.float32)
-
-    @property
-    def eta_h(self) -> torch.Tensor:
-        return torch.zeros((), dtype=torch.float32)
-
-    @property
-    def s_t(self) -> torch.Tensor:
-        return torch.zeros((), dtype=torch.float32)
-
-    @property
-    def s_n(self) -> torch.Tensor:
-        return torch.zeros((), dtype=torch.float32)
 
 
 def upgrade_renderer_state_dict(state_dict: dict, prefix: str = "") -> dict:
@@ -515,6 +481,12 @@ def upgrade_renderer_state_dict(state_dict: dict, prefix: str = "") -> dict:
         f"{prefix}deposit.fc2.weight",
         f"{prefix}deposit.fc2.bias",
     }
+    # Old checkpoint names, before the parameters took the paper's symbols.
+    rename = {
+        f"{prefix}_phi_perp_raw": f"{prefix}_nu_perp_raw",
+        f"{prefix}_psi_par_raw": f"{prefix}_zeta_par_raw",
+        f"{prefix}_ext_max_raw": f"{prefix}_xi_max_raw",
+    }
     expected_fc1_w = (_HIDDEN_DIM, _FEATURE_DIM)
     expected_fc1_b = (_HIDDEN_DIM,)
     expected_fc2_w = (_OUT_DIM, _HIDDEN_DIM)
@@ -523,6 +495,7 @@ def upgrade_renderer_state_dict(state_dict: dict, prefix: str = "") -> dict:
     for k, v in state_dict.items():
         if k in legacy:
             continue
+        k = rename.get(k, k)
         if k == f"{prefix}correction.fc1.weight" and tuple(v.shape) != expected_fc1_w:
             continue
         if k == f"{prefix}correction.fc1.bias"   and tuple(v.shape) != expected_fc1_b:
@@ -627,7 +600,7 @@ def render_boundary_map_torch(
         h_par  = renderer.h_par
         zero = (
             h_perp.sum() * 0.0 + h_par.sum() * 0.0
-            + renderer.kappa_max * 0.0 + renderer.ext_max * 0.0
+            + renderer.kappa_max * 0.0 + renderer.xi_max * 0.0
             + renderer.delta_n_max * 0.0 + renderer.alpha_range * 0.0
             + renderer.gate_temp * 0.0
             + 0.0 * rho_out_bins.sum()
@@ -646,7 +619,7 @@ def render_boundary_map_torch(
     feats_active = _active(feats_flat)
     raw_active = renderer.correction(feats_active)
     kappa_active     = renderer.kappa_max   * torch.tanh(raw_active[:, 0])
-    ext_s_active     = renderer.ext_max     * torch.tanh(raw_active[:, 1])
+    xi_active        = renderer.xi_max      * torch.tanh(raw_active[:, 1])
     delta_n_active   = renderer.delta_n_max * torch.tanh(raw_active[:, 2])
     log_alpha_active = renderer.alpha_range * torch.tanh(raw_active[:, 3])
     alpha_active = torch.exp(log_alpha_active)
@@ -671,7 +644,7 @@ def render_boundary_map_torch(
         cos_a=cos_a,
         sin_a=sin_a,
         kappa_active=kappa_active,
-        ext_s_active=ext_s_active,
+        xi_active=xi_active,
         delta_n_active=delta_n_active,
         h_perp=renderer.h_perp,
         h_par=renderer.h_par,
@@ -800,8 +773,3 @@ def cell_rho_to_2branch(rho_cell, branch):
     ii, jj = np.indices(rho_cell.shape)
     out[ii, jj, branch.astype(np.int64)] = rho_cell
     return out
-
-
-HarmonicThinRenderer = ModulationRenderer
-StampRenderer = ModulationRenderer
-AnisoDiffusionRenderer = ModulationRenderer
