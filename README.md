@@ -16,6 +16,8 @@ A compact, fully distributed algorithm that extracts edges from RGB images throu
 
 > **Paper:** [HaCI: Harmonic Contour Integration for Edge Detection](https://zenodo.org/records/23403643), DOI [10.5281/zenodo.23403643](https://doi.org/10.5281/zenodo.23403643).
 
+For collaboration contact me on: siddharth.br@proton.me 
+
 ## Examples
 
 <p align="center">
