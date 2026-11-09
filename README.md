@@ -25,10 +25,6 @@ For collaboration contact me on: siddharth.br@proton.me
   <img src="assets/edges.png" alt="Detected edges" width="48%" />
 </p>
 
-<p align="center"><em>Left: input image. Right: HaCI edge map from the bundled pretrained model.</em></p>
-
-<details>
-<summary>More examples</summary>
 <p align="center">
   <img src="assets/horse.jpg" alt="Horse" width="48%" />
   <img src="assets/horse_edges.png" alt="Horse edges" width="48%" />
@@ -45,8 +41,8 @@ For collaboration contact me on: siddharth.br@proton.me
   <img src="assets/staircase.jpg" alt="Spiral staircase" width="48%" />
   <img src="assets/staircase_edges.png" alt="Spiral staircase edges" width="48%" />
 </p>
-<p align="center"><em>Photos from <a href="https://pixabay.com/">Pixabay</a>, 640 px wide, run with <code>uv run infer</code> at default settings and no per-image tuning.</em></p>
-</details>
+
+<p align="center"><em>Left: input image. Right: HaCI edge map from the bundled pretrained model.</em></p>
 
 ## Benchmarks
 
