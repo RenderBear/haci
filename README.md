@@ -27,6 +27,27 @@ For collaboration contact me on: siddharth.br@proton.me
 
 <p align="center"><em>Left: input image. Right: HaCI edge map from the bundled pretrained model.</em></p>
 
+<details>
+<summary>More examples</summary>
+<p align="center">
+  <img src="assets/horse.jpg" alt="Horse" width="48%" />
+  <img src="assets/horse_edges.png" alt="Horse edges" width="48%" />
+</p>
+<p align="center">
+  <img src="assets/alley.jpg" alt="Alley" width="48%" />
+  <img src="assets/alley_edges.png" alt="Alley edges" width="48%" />
+</p>
+<p align="center">
+  <img src="assets/face.jpg" alt="Portrait" width="48%" />
+  <img src="assets/face_edges.png" alt="Portrait edges" width="48%" />
+</p>
+<p align="center">
+  <img src="assets/staircase.jpg" alt="Spiral staircase" width="48%" />
+  <img src="assets/staircase_edges.png" alt="Spiral staircase edges" width="48%" />
+</p>
+<p align="center"><em>Photos from <a href="https://pixabay.com/">Pixabay</a>, 640 px wide, run with <code>uv run infer</code> at default settings and no per-image tuning.</em></p>
+</details>
+
 ## Benchmarks
 
 Scores for `pretrained/final.pt` on the BRIND test set (200 images; the model was trained on the 300-image BRIND train split). Evaluation uses the Berkeley boundary benchmark: 99 thresholds and `maxDist` 0.0075 (≈4.3 px on 481×321 images). Predictions are thinned before one-to-one matching; see [Test](#test).
